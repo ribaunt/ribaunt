@@ -202,7 +202,7 @@ function normalizeMaxDurationMs(options?: SolveChallengeOptions): number {
 }
 
 function getReplayStore(options?: VerifySolutionOptions): ReplayStore | undefined {
-  const mode = options?.replayPrevention ?? 'disabled';
+  const mode = options?.replayPrevention ?? 'local';
 
   if (mode === 'disabled') {
     return undefined;

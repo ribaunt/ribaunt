@@ -3,7 +3,7 @@
 Ribaunt now includes test coverage for the main integration layers:
 
 - server-side challenge creation, solving, verification, and edge cases
-- replay-prevention modes (disabled/local/custom store)
+- replay-prevention modes (default local/disabled/custom store)
 - optional verification warning callbacks (`onWarning`) and warning reasons
 - the browser solver in `src/solver.ts`
 - browser solver cancellation via `AbortSignal`

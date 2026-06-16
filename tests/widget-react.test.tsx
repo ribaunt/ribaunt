@@ -1,10 +1,10 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
 import React, { act, createRef } from 'react';
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 
-jest.mock('../src/widget-browser.js', () => ({}));
+vi.mock('../src/widget-browser.js', () => ({}));
 
 import '../src/widget';
 import RibauntWidget, { type RibauntWidgetHandle } from '../src/widget-react';
@@ -101,11 +101,11 @@ describe('RibauntWidget React wrapper', () => {
   });
 
   it('forwards widget events to React callbacks', async () => {
-    const onVerify = jest.fn();
-    const onError = jest.fn();
-    const onStateChange = jest.fn();
-    const onReady = jest.fn();
-    const onEvent = jest.fn();
+    const onVerify = vi.fn();
+    const onError = vi.fn();
+    const onStateChange = vi.fn();
+    const onReady = vi.fn();
+    const onEvent = vi.fn();
 
     await act(async () => {
       root.render(

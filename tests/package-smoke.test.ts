@@ -1,4 +1,4 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';

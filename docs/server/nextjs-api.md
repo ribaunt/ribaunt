@@ -50,33 +50,31 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const { tokens, solutions } = body;
-    
-    // Validate required fields
+
     if (!tokens || !solutions) {
       return NextResponse.json(
         { success: false, error: 'Missing tokens or solutions' },
         { status: 400 }
       );
     }
-    
-    // Verify the PoW solution against the original tokens
+
+    // The default replay mode blocks token reuse in this process.
     const isValid = await verifySolution(tokens, solutions, {
-      replayPrevention: 'local',
       onWarning: (warning) => {
         // Optional telemetry hook without enabling debug logs
         console.log('captcha warning', warning.reason, warning.message);
       },
     });
-    
+
     if (isValid) {
       // You might also set a secure HTTP-only cookie here to track verification
       return NextResponse.json({ success: true, message: 'Verification successful' });
-    } else {
-      return NextResponse.json(
-        { success: false, error: 'Invalid or expired CAPTCHA solution' },
-        { status: 400 }
-      );
     }
+
+    return NextResponse.json(
+      { success: false, error: 'Invalid or expired CAPTCHA solution' },
+      { status: 400 }
+    );
   } catch (error) {
     return NextResponse.json(
       { success: false, error: 'Internal server error' },
@@ -125,19 +123,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const { tokens, solutions } = req.body;
-    
+
     if (!tokens || !solutions) {
       return res.status(400).json({ success: false, error: 'Missing tokens or solutions' });
     }
-    
+
+    // The default replay mode blocks token reuse in this process.
     const isValid = await verifySolution(tokens, solutions, {
-      replayPrevention: 'local',
       onWarning: (warning) => {
         // Optional telemetry hook without enabling debug logs
         console.log('captcha warning', warning.reason, warning.message);
       },
     });
-    
+
     if (isValid) {
       res.status(200).json({ success: true, message: 'Verification successful' });
     } else {
@@ -155,7 +153,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 - Return the challenge response as `{ challenges: string[] }` (recommended contract). Compatibility formats (`{ tokens: string[] }` and `string[]`) are still supported by the widget.
 - Keep `RIBAUNT_SECRET` server-only and never expose it through `NEXT_PUBLIC_` variables.
 - Choose replay strategy per deployment shape:
-  - single process: `replayPrevention: 'local'`
-  - multi-instance/serverless: `replayPrevention: 'remote'` with a distributed replay store adapter
-  - explicit backward compatibility: `replayPrevention: 'disabled'`
+  - single process: omit `replayPrevention` or pass `replayPrevention: 'local'`
+  - multi-instance/serverless: `replayPrevention: 'remote'` with an atomic distributed replay store adapter
+  - legacy opt-out only: `replayPrevention: 'disabled'`
 - Use `onWarning` in `verifySolution()` for structured verification telemetry without forcing production logs.

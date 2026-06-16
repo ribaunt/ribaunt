@@ -7,7 +7,7 @@
     "moduleResolution": "bundler",
     "target": "es2020",
     "lib": ["esnext", "dom"],
-    "types": ["node"],
+    "types": ["node", "vitest/globals"],
     "esModuleInterop": true,
     "sourceMap": true,
 

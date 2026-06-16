@@ -48,16 +48,20 @@ import { verifySolution } from 'ribaunt';
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `replayPrevention` | `'disabled' \| 'local' \| 'remote'` | `'disabled'` | `disabled` keeps backward-compatible behavior, `local` uses in-process memory, `remote` uses your custom store adapter. |
+| `replayPrevention` | `'disabled' \| 'local' \| 'remote'` | `'local'` | `local` blocks token reuse in the current process, `remote` uses your custom distributed store, and `disabled` is a legacy opt-out. |
 | `replayStore` | `{ consume(jti, expiresAt): Promise<boolean> }` | `undefined` | Required when `replayPrevention` is `remote`. Should perform atomic consume semantics (for example Redis `SET NX EX`). |
 | `debug` | `boolean` | environment-based | Enables verification warnings for malformed/invalid submissions. |
 | `onWarning` | `(warning) => void` | `undefined` | Optional callback for structured warning events (for example `invalid-token`, `replay-detected`, `invalid-solution`). Useful for telemetry while keeping production logging quiet. |
 
 ### Replay Modes
 
-- `disabled`: no replay checks; repeated valid submissions can still pass during token TTL.
-- `local`: replay checks are process-local (good for single-instance deployments).
-- `remote`: replay checks use your distributed store (recommended for serverless/multi-instance setups).
+- `local` (default): replay checks are process-local and block repeated valid submissions in single-process deployments.
+- `remote`: replay checks use your distributed store and are recommended for serverless or multi-instance setups.
+- `disabled`: legacy opt-out with no replay checks; repeated valid submissions can still pass during token TTL. Use only if another layer handles replay.
+
+### Migration Note
+
+Current versions default to process-local replay protection. If you depended on the previous replayable behavior, pass `replayPrevention: 'disabled'` explicitly while you migrate. For production serverless or horizontally scaled deployments, prefer `remote` with an atomic store such as Redis/Valkey `SET NX EX`.
 
 ```typescript
 const isValid = await verifySolution(tokens, solutions, {

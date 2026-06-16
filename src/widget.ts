@@ -297,7 +297,7 @@ export class RibauntWidget extends HTMLElement {
     this.shadow.innerHTML = `
       <style>${WIDGET_STYLES}</style>
       <div>
-        ${showWarning ? `<div class="warning">${warningMessage}</div>` : ''}
+        ${showWarning ? '<div class="warning"></div>' : ''}
         <div class="captcha" data-state="${this.state}" role="button" tabindex="${disabled ? '-1' : '0'}" aria-disabled="${disabled}" aria-label="${this.getMessage()}">
           <div class="checkbox"></div>
           <p>${this.getMessage()}</p>
@@ -315,6 +315,7 @@ export class RibauntWidget extends HTMLElement {
     this.logoElement = this.shadow.querySelector('.logo');
 
     if (showWarning && this.warningElement) {
+      this.warningElement.textContent = warningMessage;
       setTimeout(() => {
         this.warningElement?.classList.add('visible');
       }, 0);

@@ -1,5 +1,5 @@
 import { createChallenge, solveChallenge, verifySolution, LocalReplayStore } from '../src/index';
-import { afterEach, describe, expect, it, jest } from '@jest/globals';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const originalSecret = process.env.RIBAUNT_SECRET;
 
@@ -10,7 +10,7 @@ afterEach(() => {
     }
 
     process.env.RIBAUNT_SECRET = originalSecret;
-    jest.useRealTimers();
+    vi.useRealTimers();
 });
 
 describe('test challenge flow', () => {
@@ -88,14 +88,14 @@ describe('test challenge flow', () => {
     });
 
     it('rejects expired challenges', async () => {
-        jest.useFakeTimers();
+        vi.useFakeTimers();
         const issuedAt = new Date('2026-01-01T00:00:00Z');
-        jest.setSystemTime(issuedAt);
+        vi.setSystemTime(issuedAt);
 
         const [token] = createChallenge(2, 1, 1);
         const solution = solveChallenge(token);
 
-        jest.setSystemTime(new Date('2026-01-01T00:00:03Z'));
+        vi.setSystemTime(new Date('2026-01-01T00:00:03Z'));
 
         expect(solution).toBeTruthy();
         await expect(verifySolution(token, solution!.nonce)).resolves.toBe(false);
@@ -107,7 +107,7 @@ describe('test challenge flow', () => {
     });
 
     it('emits warning callbacks for malformed tokens without requiring debug logs', async () => {
-        const onWarning = jest.fn();
+        const onWarning = vi.fn();
 
         await expect(verifySolution('not-a-jwt', '123', {
             debug: false,
@@ -121,7 +121,7 @@ describe('test challenge flow', () => {
     });
 
     it('emits replay-detected warning reason when replay protection blocks a token reuse', async () => {
-        const onWarning = jest.fn();
+        const onWarning = vi.fn();
         const [token] = createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
 
@@ -150,16 +150,25 @@ describe('test challenge flow', () => {
         await expect(verifySolution([token], [{ nonce: '', hash: '' }])).resolves.toBe(false);
     });
 
-    it('keeps replay disabled by default for backwards compatibility', async () => {
+    it('blocks replay by default with local replay prevention', async () => {
         const [token] = createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
         await expect(verifySolution(token, solution!.nonce)).resolves.toBe(true);
-        await expect(verifySolution(token, solution!.nonce)).resolves.toBe(true);
+        await expect(verifySolution(token, solution!.nonce)).resolves.toBe(false);
     });
 
-    it('blocks replay when local replay prevention is enabled', async () => {
+    it('allows repeated submissions only when replay prevention is explicitly disabled', async () => {
+        const [token] = createChallenge(2, 1, 30);
+        const solution = solveChallenge(token);
+
+        expect(solution).toBeTruthy();
+        await expect(verifySolution(token, solution!.nonce, { replayPrevention: 'disabled' })).resolves.toBe(true);
+        await expect(verifySolution(token, solution!.nonce, { replayPrevention: 'disabled' })).resolves.toBe(true);
+    });
+
+    it('keeps local replay prevention behavior explicit', async () => {
         const [token] = createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
 

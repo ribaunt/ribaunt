@@ -1,10 +1,10 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
-import { jest } from '@jest/globals';
+import { vi, type Mock } from 'vitest';
 
-const mockSolveChallenge = jest.fn();
+const mockSolveChallenge = vi.fn();
 
-jest.mock('../src/solver.js', () => ({
+vi.mock('../src/solver.js', () => ({
   solveChallenge: (...args: unknown[]) => mockSolveChallenge(...args),
 }));
 
@@ -20,11 +20,11 @@ describe('RibauntWidget', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     mockSolveChallenge.mockReset();
-    global.fetch = jest.fn() as typeof fetch;
+    global.fetch = vi.fn() as typeof fetch;
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('fetches, solves, verifies, and emits lifecycle events', async () => {
@@ -33,14 +33,14 @@ describe('RibauntWidget', () => {
     widget.setAttribute('verify-endpoint', '/verify');
 
     const states: string[] = [];
-    const verifyHandler = jest.fn();
+    const verifyHandler = vi.fn();
 
     widget.addEventListener('state-change', ((event: CustomEvent<{ state: string }>) => {
       states.push(event.detail.state);
     }) as EventListener);
     widget.addEventListener('verify', verifyHandler as EventListener);
 
-    (global.fetch as jest.Mock)
+    (global.fetch as Mock)
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ challenges: ['token-1', 'token-2'] }),
@@ -89,10 +89,10 @@ describe('RibauntWidget', () => {
     const widget = document.createElement('ribaunt-widget');
     widget.setAttribute('challenge-endpoint', '/challenge');
 
-    const errorHandler = jest.fn();
+    const errorHandler = vi.fn();
     widget.addEventListener('error', errorHandler as EventListener);
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as Mock).mockResolvedValueOnce({
       ok: false,
       json: async () => ({}),
     });
@@ -112,7 +112,7 @@ describe('RibauntWidget', () => {
     widget.setAttribute('challenge-endpoint', '/challenge');
     widget.setAttribute('verify-endpoint', '/verify');
 
-    (global.fetch as jest.Mock)
+    (global.fetch as Mock)
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ tokens: ['token-1'] }),
@@ -138,10 +138,10 @@ describe('RibauntWidget', () => {
     const widget = document.createElement('ribaunt-widget');
     widget.setAttribute('challenge-endpoint', '/challenge');
 
-    const errorHandler = jest.fn();
+    const errorHandler = vi.fn();
     widget.addEventListener('error', errorHandler as EventListener);
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ challenges: ['token-1', 42] }),
     });
@@ -182,7 +182,7 @@ describe('RibauntWidget', () => {
     const widget = document.createElement('ribaunt-widget');
     widget.setAttribute('challenge-endpoint', '/challenge');
 
-    (global.fetch as jest.Mock).mockResolvedValue({
+    (global.fetch as Mock).mockResolvedValue({
       ok: true,
       json: async () => ({ challenges: ['token-1'] }),
     });
@@ -222,10 +222,10 @@ describe('RibauntWidget', () => {
     widget.setAttribute('challenge-endpoint', '/challenge');
     widget.setAttribute('solve-timeout', '10');
 
-    const errorHandler = jest.fn();
+    const errorHandler = vi.fn();
     widget.addEventListener('error', errorHandler as EventListener);
 
-    (global.fetch as jest.Mock).mockResolvedValueOnce({
+    (global.fetch as Mock).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ challenges: ['token-1'] }),
     });
@@ -263,5 +263,19 @@ describe('RibauntWidget', () => {
     await flushPromises();
 
     expect(warning.classList.contains('visible')).toBe(true);
+  });
+
+  it('renders warning-message as inert text', () => {
+    const widget = document.createElement('ribaunt-widget');
+    const warningMessage = '<img src=x onerror="globalThis.__ribauntXss=1"><span>owned</span>';
+    widget.setAttribute('show-warning', 'true');
+    widget.setAttribute('warning-message', warningMessage);
+
+    document.body.appendChild(widget);
+
+    const warning = widget.shadowRoot?.querySelector('.warning') as HTMLDivElement;
+    expect(warning.textContent).toBe(warningMessage);
+    expect(warning.querySelector('img')).toBeNull();
+    expect(warning.querySelector('span')).toBeNull();
   });
 });

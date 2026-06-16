@@ -1,5 +1,6 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
+import { vi } from 'vitest';
 import { createChallenge } from '../src/index';
 import { solveChallenge, solveSingleChallenge } from '../src/solver';
 
@@ -35,7 +36,7 @@ describe('browser solver', () => {
 
   it('solves multiple tokens and reports progress', async () => {
     const [tokenA, tokenB] = createChallenge(1, 2, 60);
-    const onProgress = jest.fn();
+    const onProgress = vi.fn();
 
     const solutions = await solveChallenge([tokenA, tokenB], onProgress);
 

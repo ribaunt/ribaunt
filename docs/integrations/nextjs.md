@@ -89,7 +89,6 @@ export async function POST(req: Request) {
   const { tokens, solutions } = body;
   
   const isValid = await verifySolution(tokens, solutions, {
-    replayPrevention: 'local',
     onWarning: (warning) => {
       // Optional structured warning telemetry
       console.log('captcha warning', warning.reason);
@@ -114,6 +113,6 @@ export async function POST(req: Request) {
 - **Validation**: Validate any dynamic inputs before passing them to `createChallenge()`. Invalid `difficulty`, `amount`, and `ttlSeconds` values now throw.
 - **Challenge endpoint contract**: Prefer returning `{ challenges: string[] }`. Compatibility formats (`{ tokens: string[] }` and raw `string[]`) are still accepted by the widget.
 - **Disabled semantics**: `disabled` now blocks both user interaction and `startVerification()`.
-- **Replay protection**: Use `replayPrevention: 'local'` for single-instance deployments or `replayPrevention: 'remote'` with a distributed store for serverless/multi-instance deployments.
+- **Replay protection**: Verification defaults to process-local replay protection. Use `replayPrevention: 'remote'` with an atomic distributed store for serverless or multi-instance deployments.
 - **Verification telemetry**: Use `onWarning` in `verifySolution()` to capture structured warning reasons without turning on debug logs.
 - **Timeouts are opt-in**: `solveTimeout`/`solve-timeout` is optional. If omitted, solve attempts are not auto-cancelled.

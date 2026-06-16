@@ -47,9 +47,7 @@ app.get('/api/captcha/challenge', (req, res) => {
 app.post('/api/captcha/verify', async (req, res) => {
   const { tokens, solutions } = req.body;
 
-  const isValid = await verifySolution(tokens, solutions, {
-    replayPrevention: 'local',
-  });
+  const isValid = await verifySolution(tokens, solutions);
   
   if (isValid) {
     res.json({ success: true, message: 'Verified!' });
@@ -71,11 +69,12 @@ The recommended challenge response contract for widget integrations is:
 
 For backwards compatibility, `{ tokens: string[] }` and raw `string[]` are also accepted.
 
+By default, `verifySolution()` blocks replay in the current process. For serverless or multi-instance deployments, use `replayPrevention: 'remote'` with an atomic distributed store. Only use `replayPrevention: 'disabled'` if another layer already prevents replay.
+
 For telemetry, you can capture structured validation warnings without enabling debug logs:
 
 ```typescript
 const isValid = await verifySolution(tokens, solutions, {
-  replayPrevention: 'local',
   onWarning: (warning) => {
     console.log('captcha warning', warning.reason, warning.message);
   },
