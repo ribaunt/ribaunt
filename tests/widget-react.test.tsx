@@ -100,6 +100,25 @@ describe('RibauntWidget React wrapper', () => {
     expect(widget.getAttribute('disabled')).toBeNull();
   });
 
+  it('forwards remaining HTML props as properties or attributes', async () => {
+    await act(async () => {
+      root.render(
+        <RibauntWidget
+          title="Widget title"
+          data-custom="custom-value"
+          aria-label={undefined}
+        />
+      );
+      await flushPromises();
+    });
+
+    await waitFor(() => Boolean(container.querySelector('ribaunt-widget')));
+
+    const widget = container.querySelector('ribaunt-widget') as HTMLElement;
+    expect(widget.title).toBe('Widget title');
+    expect(widget.getAttribute('data-custom')).toBe('custom-value');
+  });
+
   it('forwards widget events to React callbacks', async () => {
     const onVerify = vi.fn();
     const onError = vi.fn();
@@ -161,5 +180,44 @@ describe('RibauntWidget React wrapper', () => {
     });
 
     expect(ref.current?.getState()).toBe('error');
+  });
+
+  it('emits fallback ready state when the custom element does not emit state-change', async () => {
+    const originalCreateElement = document.createElement.bind(document);
+    const fallbackWidget = originalCreateElement('div') as HTMLElement & {
+      reset: () => void;
+      startVerification: () => void;
+    };
+    fallbackWidget.reset = vi.fn();
+    fallbackWidget.startVerification = vi.fn();
+    const createElementSpy = vi.spyOn(document, 'createElement').mockImplementation((tagName, options) => {
+      if (tagName === 'ribaunt-widget') {
+        return fallbackWidget;
+      }
+
+      return originalCreateElement(tagName, options);
+    });
+    const onStateChange = vi.fn();
+    const onEvent = vi.fn();
+    const ref = createRef<RibauntWidgetHandle>();
+
+    await act(async () => {
+      root.render(
+        <RibauntWidget
+          ref={ref}
+          onStateChange={onStateChange}
+          onEvent={onEvent}
+        />
+      );
+      await flushPromises();
+    });
+
+    await waitFor(() => onStateChange.mock.calls.length > 0);
+
+    expect(onStateChange).toHaveBeenCalledWith({ state: 'initial' });
+    expect(onEvent).toHaveBeenCalledWith('state-change', { state: 'initial' });
+    expect(ref.current?.getState()).toBe('');
+
+    createElementSpy.mockRestore();
   });
 });

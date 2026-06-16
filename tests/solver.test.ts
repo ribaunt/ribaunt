@@ -32,6 +32,7 @@ describe('browser solver', () => {
 
   it('returns undefined for malformed tokens', async () => {
     await expect(solveSingleChallenge('not-a-token')).resolves.toBeUndefined();
+    await expect(solveSingleChallenge('a.b.c')).resolves.toBeUndefined();
   });
 
   it('solves multiple tokens and reports progress', async () => {
@@ -68,6 +69,37 @@ describe('browser solver', () => {
       configurable: true,
       value: originalCrypto,
     });
+  });
+
+  it('throws a clear error when TextEncoder is unavailable', async () => {
+    const [token] = createChallenge(1, 1, 60);
+    const originalTextEncoder = globalThis.TextEncoder;
+
+    Object.defineProperty(globalThis, 'TextEncoder', {
+      configurable: true,
+      value: undefined,
+    });
+
+    await expect(solveSingleChallenge(token)).rejects.toThrow('TextEncoder is unavailable in this browser environment');
+
+    Object.defineProperty(globalThis, 'TextEncoder', {
+      configurable: true,
+      value: originalTextEncoder,
+    });
+  });
+
+  it('yields while solving long-running browser challenges', async () => {
+    const payload = btoa(JSON.stringify({
+      challenge: 'abc',
+      difficulty: 3,
+      expires: Math.floor(Date.now() / 1000) + 60,
+    })).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const token = `header.${payload}.signature`;
+
+    const solution = await solveSingleChallenge(token);
+
+    expect(Number(solution?.nonce)).toBeGreaterThanOrEqual(1000);
+    expect(solution?.hash.startsWith('000')).toBe(true);
   });
 
   it('aborts solving when signal is cancelled', async () => {

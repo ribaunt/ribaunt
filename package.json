@@ -34,13 +34,15 @@
   "type": "module",
   "scripts": {
     "build": "tsc && tsc --project tsconfig.cjs.json && node scripts/prepare-cjs.mjs",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.6.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@vitest/coverage-v8": "^4.1.9",
     "dotenv": "^17.2.3",
     "jsdom": "^27.0.1",
     "react": "^19.2.4",

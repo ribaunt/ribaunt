@@ -134,6 +134,26 @@ describe('RibauntWidget', () => {
     expect(widget.shadowRoot?.querySelector('.captcha')?.getAttribute('data-state')).toBe('done');
   });
 
+  it('accepts raw challenge token arrays', async () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('challenge-endpoint', '/challenge');
+
+    (global.fetch as Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ['token-1'],
+    });
+    mockSolveChallenge.mockResolvedValue([{ nonce: '1', hash: 'hash-1' }]);
+
+    document.body.appendChild(widget);
+    (widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement).click();
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(mockSolveChallenge).toHaveBeenCalledWith(['token-1'], expect.any(Function), undefined);
+    expect(widget.shadowRoot?.querySelector('.captcha')?.getAttribute('data-state')).toBe('done');
+  });
+
   it('emits an error when challenge response contains invalid token values', async () => {
     const widget = document.createElement('ribaunt-widget');
     widget.setAttribute('challenge-endpoint', '/challenge');
@@ -158,6 +178,38 @@ describe('RibauntWidget', () => {
     expect(widget.shadowRoot?.querySelector('.captcha')?.getAttribute('data-state')).toBe('error');
   });
 
+  it('emits errors for invalid challenge response shapes', async () => {
+    const cases: Array<[unknown, string]> = [
+      [null, 'Challenge response must be an object or array of token strings'],
+      [{}, 'Challenge response must include "challenges" or "tokens"'],
+      [{ challenges: [] }, 'No challenge tokens available'],
+      [{ challenges: 'token-1' }, 'Challenge response must be an array of token strings'],
+    ];
+
+    for (const [payload, message] of cases) {
+      document.body.innerHTML = '';
+      const widget = document.createElement('ribaunt-widget');
+      widget.setAttribute('challenge-endpoint', '/challenge');
+      const errorHandler = vi.fn();
+      widget.addEventListener('error', errorHandler as EventListener);
+      (global.fetch as Mock).mockReset();
+      (global.fetch as Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => payload,
+      });
+
+      document.body.appendChild(widget);
+      (widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement).click();
+
+      await flushPromises();
+      await flushPromises();
+
+      const event = errorHandler.mock.calls[0]?.[0] as CustomEvent<{ error: string }>;
+      expect(event.detail.error).toBe(message);
+      expect(widget.shadowRoot?.querySelector('.captcha')?.getAttribute('data-state')).toBe('error');
+    }
+  });
+
   it('does not start verification while disabled', async () => {
     const widget = document.createElement('ribaunt-widget');
     widget.setAttribute('challenge-endpoint', '/challenge');
@@ -176,6 +228,18 @@ describe('RibauntWidget', () => {
     expect(global.fetch).not.toHaveBeenCalled();
     expect(mockSolveChallenge).not.toHaveBeenCalled();
     expect(captcha.getAttribute('data-state')).toBe('initial');
+  });
+
+  it('updates aria state while resetting a disabled connected widget', () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('disabled', 'true');
+    document.body.appendChild(widget);
+
+    widget.reset();
+
+    const captcha = widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement;
+    expect(captcha.tabIndex).toBe(-1);
+    expect(captcha.getAttribute('aria-disabled')).toBe('true');
   });
 
   it('does not duplicate click listeners across rerenders', async () => {
@@ -215,6 +279,138 @@ describe('RibauntWidget', () => {
     expect(global.fetch).not.toHaveBeenCalled();
     expect(mockSolveChallenge).not.toHaveBeenCalled();
     expect(widget.shadowRoot?.querySelector('.captcha')?.getAttribute('data-state')).toBe('initial');
+  });
+
+  it('supports keyboard activation and ignores non-activation keys', async () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('challenge-endpoint', '/challenge');
+
+    (global.fetch as Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ challenges: ['token-1'] }),
+    });
+    mockSolveChallenge.mockResolvedValue([{ nonce: '1', hash: 'hash-1' }]);
+
+    document.body.appendChild(widget);
+    const captcha = widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement;
+
+    captcha.dispatchEvent(new KeyboardEvent('keypress', { key: 'Escape', bubbles: true }));
+    await flushPromises();
+    expect(global.fetch).not.toHaveBeenCalled();
+
+    captcha.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', bubbles: true, cancelable: true }));
+    await flushPromises();
+    await flushPromises();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not restart verification while already verifying', async () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('challenge-endpoint', '/challenge');
+
+    (global.fetch as Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ challenges: ['token-1'] }),
+    });
+    mockSolveChallenge.mockImplementation(async () => new Promise(() => {}));
+
+    document.body.appendChild(widget);
+    const captcha = widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement;
+
+    captcha.click();
+    await flushPromises();
+    captcha.click();
+    widget.startVerification();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps progress styling when rerendering during verification', async () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('challenge-endpoint', '/challenge');
+
+    (global.fetch as Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ challenges: ['token-1'] }),
+    });
+    mockSolveChallenge.mockImplementation(async (_tokens: string[], onProgress?: (progress: number) => void) => {
+      onProgress?.(33.34);
+      return new Promise(() => {});
+    });
+
+    document.body.appendChild(widget);
+    (widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement).click();
+    await flushPromises();
+    widget.setAttribute('warning-message', 'Still working');
+
+    const captcha = widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement;
+    expect(captcha.style.getPropertyValue('--progress')).toBe('33.3%');
+  });
+
+  it('emits an error when verification endpoint rejects the solution', async () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('challenge-endpoint', '/challenge');
+    widget.setAttribute('verify-endpoint', '/verify');
+    const errorHandler = vi.fn();
+    widget.addEventListener('error', errorHandler as EventListener);
+
+    (global.fetch as Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ challenges: ['token-1'] }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+      });
+    mockSolveChallenge.mockResolvedValue([{ nonce: '1', hash: 'hash-1' }]);
+
+    document.body.appendChild(widget);
+    (widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement).click();
+
+    await flushPromises();
+    await flushPromises();
+
+    const event = errorHandler.mock.calls[0]?.[0] as CustomEvent<{ error: string }>;
+    expect(event.detail.error).toBe('Verification failed');
+    expect(widget.shadowRoot?.querySelector('.captcha')?.getAttribute('data-state')).toBe('error');
+  });
+
+  it('stringifies non-Error failures in error events', async () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('challenge-endpoint', '/challenge');
+    const errorHandler = vi.fn();
+    widget.addEventListener('error', errorHandler as EventListener);
+
+    (global.fetch as Mock).mockRejectedValueOnce('network-string-failure');
+
+    document.body.appendChild(widget);
+    (widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement).click();
+
+    await flushPromises();
+    await flushPromises();
+
+    const event = errorHandler.mock.calls[0]?.[0] as CustomEvent<{ error: string }>;
+    expect(event.detail.error).toBe('network-string-failure');
+  });
+
+  it('treats invalid solve-timeout values as no timeout', async () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('challenge-endpoint', '/challenge');
+    widget.setAttribute('solve-timeout', 'not-a-number');
+
+    (global.fetch as Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ challenges: ['token-1'] }),
+    });
+    mockSolveChallenge.mockResolvedValue([{ nonce: '1', hash: 'hash-1' }]);
+
+    document.body.appendChild(widget);
+    (widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement).click();
+    await flushPromises();
+    await flushPromises();
+
+    expect(mockSolveChallenge).toHaveBeenCalledWith(['token-1'], expect.any(Function), undefined);
+    expect(widget.shadowRoot?.querySelector('.captcha')?.getAttribute('data-state')).toBe('done');
   });
 
   it('transitions to error and emits timeout metadata when solve-timeout is set', async () => {
@@ -277,5 +473,55 @@ describe('RibauntWidget', () => {
     expect(warning.textContent).toBe(warningMessage);
     expect(warning.querySelector('img')).toBeNull();
     expect(warning.querySelector('span')).toBeNull();
+  });
+
+  it('ignores unchanged attribute updates', () => {
+    const widget = document.createElement('ribaunt-widget');
+    document.body.appendChild(widget);
+    const initialCaptcha = widget.shadowRoot?.querySelector('.captcha');
+
+    widget.attributeChangedCallback?.('disabled', 'true', 'true');
+
+    expect(widget.shadowRoot?.querySelector('.captcha')).toBe(initialCaptcha);
+  });
+
+  it('handles public methods before the element is connected', () => {
+    const widget = document.createElement('ribaunt-widget');
+    const states: string[] = [];
+    widget.addEventListener('state-change', ((event: CustomEvent<{ state: string }>) => {
+      states.push(event.detail.state);
+    }) as EventListener);
+
+    widget.reset();
+
+    expect(widget.getState()).toBe('initial');
+    expect(states).toContain('initial');
+  });
+
+  it('tolerates missing internals when attaching listeners defensively', () => {
+    const widget = document.createElement('ribaunt-widget');
+    const internals = widget as unknown as {
+      captchaElement: HTMLDivElement | null;
+      logoElement: HTMLAnchorElement | null;
+      attachEventListeners: () => void;
+    };
+
+    internals.captchaElement = null;
+    internals.logoElement = null;
+
+    expect(() => internals.attachEventListeners()).not.toThrow();
+  });
+
+  it('cleans up warning animation when disconnected before the timer runs', async () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('show-warning', 'true');
+
+    document.body.appendChild(widget);
+    const warning = widget.shadowRoot?.querySelector('.warning') as HTMLDivElement;
+    (widget as unknown as { warningElement: HTMLDivElement | null }).warningElement = null;
+
+    await flushPromises();
+
+    expect(warning.classList.contains('visible')).toBe(false);
   });
 });

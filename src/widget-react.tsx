@@ -101,9 +101,9 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
     const hasReadyRef = useRef(false);
 
     useImperativeHandle(ref, () => ({
-      reset: () => widgetRef.current?.reset(),
-      getState: () => widgetRef.current?.getState() ?? '',
-      startVerification: () => widgetRef.current?.startVerification(),
+      reset: () => widgetRef.current?.reset?.(),
+      getState: () => widgetRef.current?.getState?.() ?? '',
+      startVerification: () => widgetRef.current?.startVerification?.(),
     }));
 
     useEffect(() => {

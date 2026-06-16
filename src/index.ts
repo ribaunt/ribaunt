@@ -134,17 +134,15 @@ function logVerifyWarning(message: string, options?: VerifySolutionOptions, erro
 function emitVerifyWarning(
   reason: VerifyWarningReason,
   message: string,
-  options?: VerifySolutionOptions,
-  error?: unknown
+  options?: VerifySolutionOptions
 ): void {
-  options?.onWarning?.({ reason, message, error });
+  options?.onWarning?.({ reason, message });
 
   if (!shouldDebugVerifyErrors(options)) {
     return;
   }
 
-  const details = error instanceof Error ? error.message : error;
-  console.warn(`[ribaunt] ${message}`, details ?? '');
+  console.warn(`[ribaunt] ${message}`, '');
 }
 
 function classifyVerifyWarningReason(error: unknown): VerifyWarningReason {
@@ -474,7 +472,7 @@ export function verifySolution(
     } else {
       effectiveNonce = nonce[0] as number | string;
     }
-  } else if (typeof nonce === 'object' && 'nonce' in nonce) {
+  } else if (nonce && typeof nonce === 'object' && 'nonce' in nonce) {
     effectiveNonce = (nonce as ChallengeSolution).nonce;
   } else {
     effectiveNonce = nonce as number | string;

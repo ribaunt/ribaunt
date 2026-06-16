@@ -21,7 +21,7 @@ function ensureBuild() {
 describe('package smoke tests', () => {
   beforeAll(() => {
     ensureBuild();
-  });
+  }, 60_000);
 
   it('exports working ESM and CJS server entry points', async () => {
     const esmOutput = execFileSync(

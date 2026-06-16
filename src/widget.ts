@@ -554,6 +554,7 @@ export interface RibauntWidgetElement extends HTMLElement {
 }
 
 // Register the custom element
+/* v8 ignore next -- environment guard for SSR/repeated imports */
 if (typeof window !== 'undefined' && typeof customElements !== 'undefined' && !customElements.get('ribaunt-widget')) {
   customElements.define('ribaunt-widget', RibauntWidget);
 }
