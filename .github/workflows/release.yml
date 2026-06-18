@@ -11,7 +11,7 @@ permissions:
 jobs:
   detect-version:
     name: Detect package version change
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     outputs:
       changed: ${{ steps.version.outputs.changed }}
@@ -58,7 +58,7 @@ jobs:
     name: Publish v${{ needs.detect-version.outputs.version }}
     needs: detect-version
     if: needs.detect-version.outputs.changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
 
     permissions:
       contents: write
