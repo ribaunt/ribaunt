@@ -29,7 +29,7 @@
     "type": "git",
     "url": "git+https://github.com/ribaunt/ribaunt.git"
   },
-  "license": "EUPL-1.2",
+  "license": "GPL-3.0-only",
   "author": "ribaunt",
   "type": "module",
   "scripts": {
