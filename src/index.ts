@@ -174,12 +174,7 @@ function normalizeMaxIterations(options?: SolveChallengeOptions): number | undef
     return undefined;
   }
 
-  const normalized = Math.floor(options.maxIterations);
-  if (normalized < 1) {
-    return 1;
-  }
-
-  return normalized;
+  return Math.max(0, Math.floor(options.maxIterations));
 }
 
 function normalizeMaxDurationMs(options?: SolveChallengeOptions): number {
@@ -191,12 +186,7 @@ function normalizeMaxDurationMs(options?: SolveChallengeOptions): number {
     return DEFAULT_SOLVE_MAX_DURATION_MS;
   }
 
-  const normalized = Math.floor(options.maxDurationMs);
-  if (normalized < 1) {
-    return 1;
-  }
-
-  return normalized;
+  return Math.max(0, Math.floor(options.maxDurationMs));
 }
 
 function getReplayStore(options?: VerifySolutionOptions): ReplayStore | undefined {
@@ -334,7 +324,7 @@ async function verifySingleSolution(
   nonce: number | string | undefined,
   options?: VerifySolutionOptions
 ): Promise<boolean> {
-  if (nonce === undefined || nonce === null) {
+  if (nonce === undefined || nonce === null || nonce === '') {
     emitVerifyWarning('invalid-solution', 'verifySolution received an empty nonce', options);
     return false;
   }
