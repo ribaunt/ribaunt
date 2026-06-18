@@ -122,6 +122,7 @@ Plain LAN URLs such as `http://192.168.x.x` may not expose `crypto.subtle`, espe
 |---|---|---|---|---|
 | `challenge-endpoint` | `challengeEndpoint` | `string` | `undefined` | URL endpoint that returns the JWT tokens. If undefined, the widget cannot auto-fetch. |
 | `verify-endpoint` | `verifyEndpoint` | `string` | `undefined` | URL endpoint to POST the solutions. If undefined, you must handle verification manually using the solver directly. |
+| `auto-verify` | `autoVerify` | `boolean\|string` | `false` | Starts verification automatically once the widget loads. Set to `"false"` or omit it to require user interaction or `startVerification()`. |
 | `show-warning` | `showWarning` | `boolean\|string` | `false` | Shows a red warning banner above the widget. Often used to alert users if WebAssembly is missing for future fast-solvers. |
 | `warning-message` | `warningMessage` | `string` | `"Enable WASM..."` | Custom message text for the warning banner. |
 | `solve-timeout` | `solveTimeout` | `number\|string` | `undefined` | Optional timeout in milliseconds for solving. If omitted, solving is not automatically timed out. |
@@ -144,6 +145,7 @@ When `disabled` is present and not equal to `"false"`:
 - click interaction is blocked
 - keyboard activation is blocked
 - `startVerification()` does nothing
+- `auto-verify` will not start while the widget is disabled
 - the widget is removed from tab order
 - `aria-disabled="true"` is applied for accessibility
 
@@ -153,6 +155,7 @@ When `disabled` is present and not equal to `"false"`:
 <ribaunt-widget
   challenge-endpoint="https://api.myapp.com/challenge"
   verify-endpoint="https://api.myapp.com/verify"
+  auto-verify="true"
   show-warning="true"
   warning-message="WASM is disabled; this may take 3x longer!"
   solve-timeout="15000"
@@ -168,6 +171,7 @@ When using the React wrapper (`ribaunt/widget-react`), all HTML attributes above
 |---|---|---|
 | `challengeEndpoint` | `string` | (HTML: `challenge-endpoint`) |
 | `verifyEndpoint` | `string` | (HTML: `verify-endpoint`) |
+| `autoVerify` | `boolean\|string` | (HTML: `auto-verify`) |
 | `showWarning` | `boolean\|string` | (HTML: `show-warning`) |
 | `warningMessage` | `string` | (HTML: `warning-message`) |
 | `solveTimeout` | `number\|string` | (HTML: `solve-timeout`) |

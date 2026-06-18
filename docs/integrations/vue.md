@@ -38,6 +38,7 @@ Then, simply import the widget as a side-effect and use the `<ribaunt-widget>` t
       ref="widgetRef"
       challenge-endpoint="/api/captcha/challenge"
       verify-endpoint="/api/captcha/verify"
+      auto-verify="true"
       :show-warning="showWarning"
       :solve-timeout="15000"
       :disabled="isDisabled"
@@ -99,6 +100,6 @@ When using `challenge-endpoint`, the recommended response shape is `{ challenges
 
 For backwards compatibility, the widget also accepts `{ tokens: string[] }` and raw `string[]`.
 
-If you bind `disabled`, note that the widget now treats it as a real interaction lock: clicks, keyboard activation, and `startVerification()` are blocked until the prop is cleared.
+Use `auto-verify="true"` if the widget should start solving as soon as it mounts. If you bind `disabled`, note that the widget now treats it as a real interaction lock: clicks, keyboard activation, `startVerification()`, and `auto-verify` are blocked until the prop is cleared.
 
 If the browser does not expose `crypto.subtle`, verification will fail with a clear error indicating that HTTPS or `localhost` is required.

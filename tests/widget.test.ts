@@ -85,6 +85,63 @@ describe('RibauntWidget', () => {
     expect(widget.shadowRoot?.querySelector('p')?.textContent).toBe("You're a human");
   });
 
+  it('automatically verifies on load when auto-verify is enabled', async () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('challenge-endpoint', '/challenge');
+    widget.setAttribute('verify-endpoint', '/verify');
+    widget.setAttribute('auto-verify', 'true');
+
+    const verifyHandler = vi.fn();
+    widget.addEventListener('verify', verifyHandler as EventListener);
+
+    (global.fetch as Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ challenges: ['token-1'] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
+      });
+
+    mockSolveChallenge.mockResolvedValue([{ nonce: '1', hash: 'hash-1' }]);
+
+    document.body.appendChild(widget);
+    await flushPromises();
+    await flushPromises();
+
+    expect(global.fetch).toHaveBeenNthCalledWith(1, '/challenge');
+    expect(mockSolveChallenge).toHaveBeenCalledWith(['token-1'], expect.any(Function), undefined);
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      2,
+      '/verify',
+      expect.objectContaining({
+        method: 'POST',
+      })
+    );
+    expect(verifyHandler).toHaveBeenCalledTimes(1);
+    expect(widget.getState()).toBe('done');
+  });
+
+  it('does not auto-verify when disabled or explicitly opted out', async () => {
+    const disabledWidget = document.createElement('ribaunt-widget');
+    disabledWidget.setAttribute('challenge-endpoint', '/challenge');
+    disabledWidget.setAttribute('auto-verify', 'true');
+    disabledWidget.setAttribute('disabled', 'true');
+
+    const optedOutWidget = document.createElement('ribaunt-widget');
+    optedOutWidget.setAttribute('challenge-endpoint', '/challenge');
+    optedOutWidget.setAttribute('auto-verify', 'false');
+
+    document.body.append(disabledWidget, optedOutWidget);
+    await flushPromises();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockSolveChallenge).not.toHaveBeenCalled();
+    expect(disabledWidget.getState()).toBe('initial');
+    expect(optedOutWidget.getState()).toBe('initial');
+  });
+
   it('emits an error event when challenge fetch fails', async () => {
     const widget = document.createElement('ribaunt-widget');
     widget.setAttribute('challenge-endpoint', '/challenge');

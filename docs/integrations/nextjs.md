@@ -41,6 +41,7 @@ export default function MyPage() {
         ref={widgetRef}
         challengeEndpoint="/api/captcha/challenge"
         verifyEndpoint="/api/captcha/verify"
+        autoVerify={true}
         solveTimeout={15000}
         showWarning={false}
         onVerify={handleVerify}
@@ -57,7 +58,7 @@ export default function MyPage() {
 }
 ```
 
-The wrapper also syncs `challengeEndpoint`, `verifyEndpoint`, `showWarning`, `warningMessage`, `solveTimeout`, and `disabled` after mount, so you generally do not need to force remounts when those props change.
+The wrapper also syncs `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `showWarning`, `warningMessage`, `solveTimeout`, and `disabled` after mount, so you generally do not need to force remounts when those props change.
 
 ## Step 2: Setting up Next.js Route Handlers (API Routes)
 
@@ -112,7 +113,8 @@ export async function POST(req: Request) {
 - **Secure context**: Browser solving uses Web Crypto, so development should run on `https://` or `http://localhost`. Plain local-network HTTP URLs may fail in some browsers.
 - **Validation**: Validate any dynamic inputs before passing them to `createChallenge()`. Invalid `difficulty`, `amount`, and `ttlSeconds` values now throw.
 - **Challenge endpoint contract**: Prefer returning `{ challenges: string[] }`. Compatibility formats (`{ tokens: string[] }` and raw `string[]`) are still accepted by the widget.
-- **Disabled semantics**: `disabled` now blocks both user interaction and `startVerification()`.
+- **Auto verify**: Set `autoVerify` when the widget should begin verification as soon as it mounts, without a user click.
+- **Disabled semantics**: `disabled` now blocks user interaction, `startVerification()`, and `autoVerify`.
 - **Replay protection**: Verification defaults to process-local replay protection. Use `replayPrevention: 'remote'` with an atomic distributed store for serverless or multi-instance deployments.
 - **Verification telemetry**: Use `onWarning` in `verifySolution()` to capture structured warning reasons without turning on debug logs.
 - **Timeouts are opt-in**: `solveTimeout`/`solve-timeout` is optional. If omitted, solve attempts are not auto-cancelled.

@@ -6,6 +6,7 @@
  * <ribaunt-widget
  *   challenge-endpoint="/api/challenge"
  *   verify-endpoint="/api/verify"
+ *   auto-verify="true"
  *   show-warning="true"
  *   warning-message="Custom warning message"
  * ></ribaunt-widget>
@@ -252,11 +253,13 @@ export class RibauntWidget extends HTMLElement {
   private messageElement: HTMLParagraphElement | null = null;
   private warningElement: HTMLDivElement | null = null;
   private logoElement: HTMLAnchorElement | null = null;
+  private autoVerifyStarted = false;
 
   static get observedAttributes() {
     return [
       'challenge-endpoint',
       'verify-endpoint',
+      'auto-verify',
       'show-warning',
       'warning-message',
       'solve-timeout',
@@ -275,6 +278,7 @@ export class RibauntWidget extends HTMLElement {
   connectedCallback() {
     this.render();
     this.dispatchStateChange();
+    this.maybeAutoVerify();
   }
 
   disconnectedCallback() {
@@ -284,6 +288,9 @@ export class RibauntWidget extends HTMLElement {
   attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null) {
     if (oldValue !== newValue) {
       this.render();
+      if (name === 'auto-verify') {
+        this.maybeAutoVerify();
+      }
     }
   }
 
@@ -395,6 +402,21 @@ export class RibauntWidget extends HTMLElement {
 
   private isDisabled(): boolean {
     return this.hasAttribute('disabled') && this.getAttribute('disabled') !== 'false';
+  }
+
+  private shouldAutoVerify(): boolean {
+    return this.hasAttribute('auto-verify') && this.getAttribute('auto-verify') !== 'false';
+  }
+
+  private maybeAutoVerify() {
+    if (!this.isConnected || this.autoVerifyStarted || !this.shouldAutoVerify()) {
+      return;
+    }
+
+    this.autoVerifyStarted = true;
+    queueMicrotask(() => {
+      this.startVerification();
+    });
   }
 
   private setState(newState: WidgetState) {
@@ -573,6 +595,7 @@ declare global {
       'ribaunt-widget': import('react').DetailedHTMLProps<import('react').HTMLAttributes<RibauntWidgetElement>, RibauntWidgetElement> & {
         'challenge-endpoint'?: string;
         'verify-endpoint'?: string;
+        'auto-verify'?: string | boolean;
         'show-warning'?: string | boolean;
         'warning-message'?: string;
         'solve-timeout'?: string;

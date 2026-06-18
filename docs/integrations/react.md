@@ -46,6 +46,7 @@ export default function MyReactApp() {
         ref={widgetRef}
         challengeEndpoint="/api/captcha/challenge"
         verifyEndpoint="/api/captcha/verify"
+        autoVerify={true}
         solveTimeout={15000}
         onVerify={handleVerify}
         onError={handleError}
@@ -69,6 +70,7 @@ The React wrapper now updates these props live after mount:
 
 - `challengeEndpoint`
 - `verifyEndpoint`
+- `autoVerify`
 - `showWarning`
 - `warningMessage`
 - `solveTimeout`
@@ -78,7 +80,7 @@ If your older integration used a changing `key` to force a remount when one of t
 
 ### Disabled State
 
-When `disabled` is set, the wrapped widget blocks both user interaction and `startVerification()`. Remove or clear `disabled` before expecting the widget to run.
+When `disabled` is set, the wrapped widget blocks user interaction, `startVerification()`, and `autoVerify`. Remove or clear `disabled` before expecting the widget to run.
 
 ### Challenge Endpoint Response Contract
 

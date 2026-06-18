@@ -25,6 +25,7 @@ You can load the script as an ES module directly in your HTML:
             id="captcha"
             challenge-endpoint="/api/captcha/challenge"
             verify-endpoint="/api/captcha/verify"
+            auto-verify="true"
             solve-timeout="15000"
         ></ribaunt-widget>
 
@@ -66,7 +67,9 @@ You can load the script as an ES module directly in your HTML:
 
 - The recommended challenge endpoint response is `{ challenges: string[] }`.
 - For backwards compatibility, the widget also accepts `{ tokens: string[] }` and raw `string[]`.
+- Add `auto-verify="true"` when you want the widget to start solving immediately after it loads instead of waiting for a click or keyboard activation.
 - If you set `disabled` on `<ribaunt-widget>`, it now blocks both user interaction and `startVerification()`.
+- A disabled widget will not start from `auto-verify` until you trigger verification yourself after clearing `disabled`.
 - Remove the `disabled` attribute before expecting the widget to verify.
 - If the browser cannot access `crypto.subtle`, the widget will emit an error explaining that HTTPS or `localhost` is required.
 

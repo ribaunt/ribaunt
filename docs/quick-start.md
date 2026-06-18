@@ -98,6 +98,7 @@ export default function MyForm() {
       <RibauntWidget 
         challengeEndpoint="/api/captcha/challenge"
         verifyEndpoint="/api/captcha/verify"
+        autoVerify={true}
         solveTimeout={15000}
         onVerify={() => console.log('User verified!')}
         onError={(detail) => console.error('Verification failed:', detail.error)}
@@ -109,7 +110,7 @@ export default function MyForm() {
 }
 ```
 
-The React wrapper now syncs `challengeEndpoint`, `verifyEndpoint`, `showWarning`, `warningMessage`, `solveTimeout`, and `disabled` after mount. You no longer need to force a remount just to update those props.
+The React wrapper now syncs `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `showWarning`, `warningMessage`, `solveTimeout`, and `disabled` after mount. You no longer need to force a remount just to update those props.
 
 ### Using Plain HTML
 Include the widget in your HTML file directly:
@@ -120,6 +121,7 @@ Include the widget in your HTML file directly:
 <ribaunt-widget 
   challenge-endpoint="/api/captcha/challenge"
   verify-endpoint="/api/captcha/verify"
+  auto-verify="true"
 ></ribaunt-widget>
 
 <script>

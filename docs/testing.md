@@ -9,6 +9,7 @@ Ribaunt now includes test coverage for the main integration layers:
 - browser solver cancellation via `AbortSignal`
 - server-side solve guardrails (`maxIterations`, `maxDurationMs`)
 - the web component widget fetch/solve/verify flow
+- declarative widget auto-verification on load
 - widget opt-in solve-timeout failure path and warning animation behavior
 - widget challenge payload parsing for supported response shapes and malformed payload rejection
 - emitted widget events and disabled-state behavior
@@ -29,8 +30,8 @@ npm test -- --runInBand
 |---|---|
 | `tests/challenge.test.ts` | Server-side challenge flow, malformed tokens, async verification, replay modes, expiry, and invalid config |
 | `tests/solver.test.ts` | Browser solver token decoding, solving, progress reporting, invalid-token handling, cancellation, and missing Web Crypto behavior |
-| `tests/widget.test.ts` | Widget fetch/solve/verify flow, solve-timeout behavior, warning visibility animation, emitted events, disabled behavior, and listener lifecycle |
-| `tests/widget-react.test.tsx` | React wrapper prop syncing, callback/event forwarding, and imperative ref methods |
+| `tests/widget.test.ts` | Widget fetch/solve/verify flow, auto-verify behavior, solve-timeout behavior, warning visibility animation, emitted events, disabled behavior, and listener lifecycle |
+| `tests/widget-react.test.tsx` | React wrapper prop syncing, including `autoVerify`, callback/event forwarding, and imperative ref methods |
 | `tests/package-smoke.test.ts` | Built ESM/CJS entry points, browser bundle loading, and package export targets |
 
 ## Notes

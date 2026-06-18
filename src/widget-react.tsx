@@ -6,6 +6,7 @@ import type { RibauntWidgetElement, WidgetState } from './widget.js';
 export interface RibauntWidgetProps extends Omit<React.HTMLAttributes<RibauntWidgetElement>, 'onError' | 'onLoad'> {
   challengeEndpoint?: string;
   verifyEndpoint?: string;
+  autoVerify?: boolean | string;
   showWarning?: boolean | string;
   warningMessage?: string;
   solveTimeout?: number | string;
@@ -46,9 +47,11 @@ function syncWidgetProps(
     warningMessage,
     solveTimeout,
     disabled,
+    autoVerify,
   }: {
     challengeEndpoint: string | undefined;
     verifyEndpoint: string | undefined;
+    autoVerify: boolean | string | undefined;
     showWarning: boolean | string | undefined;
     warningMessage: string | undefined;
     solveTimeout: number | string | undefined;
@@ -57,6 +60,7 @@ function syncWidgetProps(
 ) {
   syncAttribute(element, 'challenge-endpoint', challengeEndpoint);
   syncAttribute(element, 'verify-endpoint', verifyEndpoint);
+  syncAttribute(element, 'auto-verify', autoVerify);
   syncAttribute(element, 'show-warning', showWarning);
   syncAttribute(element, 'warning-message', warningMessage);
   syncAttribute(element, 'solve-timeout', solveTimeout);
@@ -76,6 +80,7 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       warningMessage,
       solveTimeout,
       disabled,
+      autoVerify,
       onVerify,
       onError,
       onStateChange,
@@ -169,6 +174,7 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       syncWidgetProps(widget, {
         challengeEndpoint,
         verifyEndpoint,
+        autoVerify,
         showWarning,
         warningMessage,
         solveTimeout,
@@ -211,12 +217,13 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       syncWidgetProps(widgetRef.current, {
         challengeEndpoint,
         verifyEndpoint,
+        autoVerify,
         showWarning,
         warningMessage,
         solveTimeout,
         disabled,
       });
-    }, [challengeEndpoint, verifyEndpoint, showWarning, warningMessage, solveTimeout, disabled]);
+    }, [challengeEndpoint, verifyEndpoint, autoVerify, showWarning, warningMessage, solveTimeout, disabled]);
 
     return isLoading ? null : <div ref={containerRef} />;
   }
