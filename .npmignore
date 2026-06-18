@@ -1,11 +1,14 @@
 src/
 tests/
+coverage/
+.github/
 .env
 .gitignore
-jest.config.cjs
+vitest.config.ts
 tsconfig.json
 tsconfig.cjs.json
 .tmp/
 *.log
 AGENTS.md
 docs/
+scripts/
