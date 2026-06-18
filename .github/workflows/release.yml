@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   detect-version:
-    name: Detect package version change
+    name: Detect npm version availability
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     outputs:
@@ -21,27 +21,36 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 2
 
-      - name: Check package version
+      - name: Check npm registry version
         id: version
         shell: bash
         run: |
           set -euo pipefail
 
+          package_name="$(node -p "require('./package.json').name")"
           version="$(node -p "require('./package.json').version")"
           tag="v${version}"
-          previous_version=""
+          published_version=""
+          exact_version=""
 
-          if git cat-file -e HEAD^:package.json 2>/dev/null; then
-            previous_version="$(git show HEAD^:package.json | node -e "let input = ''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(JSON.parse(input).version || ''));")"
+          if published_version="$(npm view "${package_name}" version --json 2>/tmp/npm-view-latest.log | node -e "let input = ''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(input ? JSON.parse(input) : ''));")"; then
+            :
+          elif grep -q "E404" /tmp/npm-view-latest.log; then
+            published_version=""
+          else
+            cat /tmp/npm-view-latest.log >&2
+            exit 1
           fi
 
-          if [[ "$version" != "$previous_version" ]]; then
-            changed="true"
-          else
+          if exact_version="$(npm view "${package_name}@${version}" version --json 2>/tmp/npm-view-exact.log | node -e "let input = ''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(input ? JSON.parse(input) : ''));")"; then
             changed="false"
+          elif grep -q "E404" /tmp/npm-view-exact.log; then
+            changed="true"
+            exact_version=""
+          else
+            cat /tmp/npm-view-exact.log >&2
+            exit 1
           fi
 
           {
@@ -50,8 +59,10 @@ jobs:
             echo "tag=${tag}"
           } >> "$GITHUB_OUTPUT"
 
+          echo "Package name: ${package_name}"
           echo "Current version: ${version}"
-          echo "Previous version: ${previous_version:-<none>}"
+          echo "Published latest version: ${published_version:-<none>}"
+          echo "Exact published version: ${exact_version:-<none>}"
           echo "Release needed: ${changed}"
 
   release:
