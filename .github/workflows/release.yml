@@ -69,7 +69,7 @@ jobs:
     name: Publish v${{ needs.detect-version.outputs.version }}
     needs: detect-version
     if: needs.detect-version.outputs.changed == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-latest
 
     permissions:
       contents: write
