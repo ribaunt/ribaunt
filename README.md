@@ -37,10 +37,13 @@ pnpm add ribaunt
 ## Quick Start
 
 Set a strong secret in your server environment. Keep this server-only.
+Ribaunt requires at least 32 UTF-8 bytes; generate a random value rather than a memorable password.
 
 ```env
 RIBAUNT_SECRET="replace-with-a-long-random-secret"
 ```
+
+> **Upgrading from v0.1:** `verifySolution()` now returns a structured result object, not a boolean. Always check `result.valid`; using the result object directly in an `if` condition is unsafe because JavaScript objects are truthy.
 
 Create two endpoints: one to issue challenges and one to verify solutions.
 
@@ -60,10 +63,10 @@ app.get('/api/captcha/challenge', (_req, res) => {
 
 app.post('/api/captcha/verify', async (req, res) => {
   const { tokens, solutions } = req.body;
-  const valid = await verifySolution(tokens, solutions);
+  const result = await verifySolution(tokens, solutions);
 
-  if (!valid) {
-    return res.status(400).json({ success: false, error: 'Invalid CAPTCHA solution' });
+  if (!result.valid) {
+    return res.status(400).json({ success: false, error: result.reason });
   }
 
   return res.json({ success: true });
@@ -142,10 +145,11 @@ Validate user- or config-controlled values before passing them to `createChallen
 
 ### `verifySolution(tokens, solutions, options?)`
 
-Verifies submitted solutions and returns `Promise<boolean>`.
+Verifies submitted solutions and returns a structured result:
+`{ valid: true }` or `{ valid: false, reason, message }`.
 
 ```ts
-const valid = await verifySolution(tokens, solutions, {
+const result = await verifySolution(tokens, solutions, {
   onWarning: (warning) => {
     console.log('captcha warning', warning.reason, warning.message);
   },
@@ -155,7 +159,7 @@ const valid = await verifySolution(tokens, solutions, {
 Replay prevention defaults to `local`, which blocks token reuse in the current process. For serverless or horizontally scaled deployments, use `replayPrevention: 'remote'` with an atomic distributed store.
 
 ```ts
-const valid = await verifySolution(tokens, solutions, {
+const result = await verifySolution(tokens, solutions, {
   replayPrevention: 'remote',
   replayStore: {
     consume: async (jti, expiresAt) => {

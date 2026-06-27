@@ -1,6 +1,6 @@
 {
   "name": "ribaunt",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "A PoW CAPTCHA library that provides stateless and secure user verification",
   "homepage": "https://ribaunt.com",
   "bugs": {
@@ -23,6 +23,19 @@
       "client": "./dist/widget-react.js",
       "default": "./dist/widget-react.js",
       "types": "./dist/widget-react.d.ts"
+    },
+    "./redis": {
+      "types": "./dist/redis.d.ts",
+      "import": "./dist/redis.js",
+      "require": "./dist/cjs/redis.js"
+    },
+    "./worker": {
+      "types": "./dist/solver-worker.d.ts",
+      "default": "./dist/solver-worker.js"
+    },
+    "./worker-client": {
+      "types": "./dist/worker-client.d.ts",
+      "default": "./dist/worker-client.js"
     }
   },
   "repository": {
@@ -33,7 +46,7 @@
   "author": "ribaunt",
   "type": "module",
   "scripts": {
-    "build": "tsc && tsc --project tsconfig.cjs.json && node scripts/prepare-cjs.mjs",
+    "build": "node scripts/clean.mjs && tsc && tsc --project tsconfig.cjs.json && node scripts/prepare-cjs.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
@@ -51,10 +64,18 @@
     "vitest": "^4.1.9"
   },
   "peerDependencies": {
+    "ioredis": ">=5.0.0",
+    "redis": ">=4.0.0",
     "react": "^18.0.0 || ^19.0.0",
     "react-dom": "^18.0.0 || ^19.0.0"
   },
   "peerDependenciesMeta": {
+    "ioredis": {
+      "optional": true
+    },
+    "redis": {
+      "optional": true
+    },
     "react": {
       "optional": true
     },

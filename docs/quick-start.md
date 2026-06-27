@@ -16,7 +16,7 @@ pnpm add ribaunt
 
 ## 1. Set Up Environment Variables
 
-Ribaunt uses JWT to securely sign challenge tokens. You must set a strong secret in your server environment:
+Ribaunt uses JWT to securely sign challenge tokens. You must set a random secret of at least 32 UTF-8 bytes in your server environment:
 
 ```env
 RIBAUNT_SECRET="your-very-strong-random-secret-key"
@@ -47,9 +47,9 @@ app.get('/api/captcha/challenge', (req, res) => {
 app.post('/api/captcha/verify', async (req, res) => {
   const { tokens, solutions } = req.body;
 
-  const isValid = await verifySolution(tokens, solutions);
+  const result = await verifySolution(tokens, solutions);
   
-  if (isValid) {
+  if (result.valid) {
     res.json({ success: true, message: 'Verified!' });
   } else {
     res.status(400).json({ success: false, error: 'Invalid solution' });
@@ -74,7 +74,7 @@ By default, `verifySolution()` blocks replay in the current process. For serverl
 For telemetry, you can capture structured validation warnings without enabling debug logs:
 
 ```typescript
-const isValid = await verifySolution(tokens, solutions, {
+const result = await verifySolution(tokens, solutions, {
   onWarning: (warning) => {
     console.log('captcha warning', warning.reason, warning.message);
   },

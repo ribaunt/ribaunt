@@ -38,12 +38,13 @@ import { createChallenge } from 'ribaunt';
 ## Server-Side: `verifySolution` (async)
 
 `verifySolution()` is asynchronous and supports optional replay-prevention modes.
+When `context` is supplied, the challenge must have been created with the same context; unbound tokens are rejected.
 
 ```typescript
 import { verifySolution } from 'ribaunt';
 
 // Signature
-// verifySolution(tokens, nonceOrSolutions, options?): Promise<boolean>
+// verifySolution(tokens, nonceOrSolutions, options?): Promise<VerifySolutionResult>
 ```
 
 | Option | Type | Default | Description |
@@ -64,7 +65,7 @@ import { verifySolution } from 'ribaunt';
 Current versions default to process-local replay protection. If you depended on the previous replayable behavior, pass `replayPrevention: 'disabled'` explicitly while you migrate. For production serverless or horizontally scaled deployments, prefer `remote` with an atomic store such as Redis/Valkey `SET NX EX`.
 
 ```typescript
-const isValid = await verifySolution(tokens, solutions, {
+const result = await verifySolution(tokens, solutions, {
   replayPrevention: 'remote',
   replayStore: {
     consume: async (jti, expiresAt) => {
@@ -77,7 +78,7 @@ const isValid = await verifySolution(tokens, solutions, {
 
 ### Optional Verification Warnings
 
-`verifySolution()` continues to return `false` for invalid inputs, but you can now capture structured warning details without enabling console logs:
+`verifySolution()` returns `{ valid: false, reason, message }` for invalid inputs. You can also capture warning callbacks without enabling console logs:
 
 ```typescript
 await verifySolution(tokens, solutions, {

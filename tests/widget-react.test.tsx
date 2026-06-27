@@ -218,8 +218,16 @@ describe('RibauntWidget React wrapper', () => {
 
     await waitFor(() => onStateChange.mock.calls.length > 0);
 
-    expect(onStateChange).toHaveBeenCalledWith({ state: 'initial' });
-    expect(onEvent).toHaveBeenCalledWith('state-change', { state: 'initial' });
+    expect(onStateChange).toHaveBeenCalledWith({
+      state: 'initial',
+      phase: 'initial',
+      progress: 0,
+    });
+    expect(onEvent).toHaveBeenCalledWith('state-change', {
+      state: 'initial',
+      phase: 'initial',
+      progress: 0,
+    });
     expect(ref.current?.getState()).toBe('');
 
     createElementSpy.mockRestore();

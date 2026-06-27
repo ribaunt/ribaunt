@@ -22,7 +22,7 @@ const port = process.env.PORT || 3000;
 // Middleware to parse JSON bodies
 app.use(express.json());
 
-// Set your strong secret in the environment before handling requests.
+// Set a random secret of at least 32 UTF-8 bytes before handling requests.
 // e.g. export RIBAUNT_SECRET="your_very_strong_random_secret_string"
 if (!process.env.RIBAUNT_SECRET) {
   console.warn('WARNING: RIBAUNT_SECRET environment variable is not set!');
@@ -55,14 +55,14 @@ app.post('/api/captcha/verify', async (req, res) => {
     
     // Verify the PoW solution against the original tokens.
     // The default replay mode blocks token reuse in this process.
-    const isValid = await verifySolution(tokens, solutions, {
+    const result = await verifySolution(tokens, solutions, {
       onWarning: (warning) => {
         // Optional telemetry hook without enabling debug logs
         console.log('captcha warning', warning.reason, warning.message);
       },
     });
     
-    if (isValid) {
+    if (result.valid) {
       // You can implement custom logic here like tracking the IP or setting a session token
       return res.json({ 
         success: true, 

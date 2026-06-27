@@ -33,7 +33,8 @@ describe('package smoke tests', () => {
           const mod = await import(${JSON.stringify(new URL(`file://${resolve(rootDir, 'dist/index.js')}`).href)});
           console.log(JSON.stringify({
             createChallenge: typeof mod.createChallenge,
-            verifySolution: typeof mod.verifySolution
+            verifySolution: typeof mod.verifySolution,
+            selectWorkload: typeof mod.selectWorkload
           }));
         `,
       ],
@@ -48,7 +49,8 @@ describe('package smoke tests', () => {
           const mod = require(${JSON.stringify(resolve(rootDir, 'dist/cjs/index.js'))});
           console.log(JSON.stringify({
             createChallenge: typeof mod.createChallenge,
-            verifySolution: typeof mod.verifySolution
+            verifySolution: typeof mod.verifySolution,
+            selectWorkload: typeof mod.selectWorkload
           }));
         `,
       ],
@@ -58,10 +60,12 @@ describe('package smoke tests', () => {
     expect(JSON.parse(esmOutput)).toEqual({
       createChallenge: 'function',
       verifySolution: 'function',
+      selectWorkload: 'function',
     });
     expect(JSON.parse(cjsOutput)).toEqual({
       createChallenge: 'function',
       verifySolution: 'function',
+      selectWorkload: 'function',
     });
   });
 
@@ -113,5 +117,18 @@ describe('package smoke tests', () => {
     expect(packageJson.exports['.']?.require).toBe('./dist/cjs/index.js');
     expect(packageJson.exports['./widget']?.default).toBe('./dist/widget-browser.js');
     expect(packageJson.exports['./widget-react']?.default).toBe('./dist/widget-react.js');
+    expect(packageJson.exports['./redis']?.import).toBe('./dist/redis.js');
+    expect(packageJson.exports['./worker']?.default).toBe('./dist/solver-worker.js');
+  });
+
+  it('pins privileged workflow actions to immutable commits', () => {
+    const workflows = [
+      readFileSync(resolve(rootDir, '.github/workflows/ci.yml'), 'utf8'),
+      readFileSync(resolve(rootDir, '.github/workflows/release.yml'), 'utf8'),
+    ].join('\n');
+
+    expect(workflows).not.toMatch(/uses:\s+actions\/(?:checkout|setup-node)@v\d+/);
+    expect(workflows).toContain('actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10');
+    expect(workflows).toContain('actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020');
   });
 });

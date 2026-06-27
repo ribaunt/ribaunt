@@ -26,7 +26,12 @@
  * - state-change: Fired when widget state changes
  */
 
-import { solveChallenge, type ChallengeSolution } from './solver.js';
+import { calibrateBrowser, type ChallengeSolution } from './solver.js';
+import {
+  solveChallengeWithWorker,
+  WorkerUnavailableError,
+  type WorkerMode,
+} from './worker-client.js';
 
 const WIDGET_STYLES = `
   /* Widget Container Styles */
@@ -63,6 +68,8 @@ const WIDGET_STYLES = `
     filter: none;
   }
 
+  :host([disabled]) .captcha[data-state=fetching],
+  :host([disabled]) .captcha[data-state=solving],
   :host([disabled]) .captcha[data-state=verifying] {
     cursor: progress;
   }
@@ -73,6 +80,11 @@ const WIDGET_STYLES = `
 
   .captcha:hover {
     filter: brightness(98%);
+  }
+
+  .captcha:focus-visible {
+    outline: 3px solid var(--ribaunt-focus-color, #1677ff);
+    outline-offset: 3px;
   }
 
   /* Checkbox Styles */
@@ -103,6 +115,8 @@ const WIDGET_STYLES = `
   }
 
   /* Verifying State */
+  .captcha[data-state=fetching] .checkbox,
+  .captcha[data-state=solving] .checkbox,
   .captcha[data-state=verifying] .checkbox {
     background: none;
     display: flex;
@@ -121,6 +135,8 @@ const WIDGET_STYLES = `
     transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
+  .captcha[data-state=fetching] .checkbox::after,
+  .captcha[data-state=solving] .checkbox::after,
   .captcha[data-state=verifying] .checkbox::after {
     content: "";
     background-color: var(--ribaunt-background, #fdfdfd);
@@ -166,8 +182,28 @@ const WIDGET_STYLES = `
 
   /* Logo color adapts to theme */
   @media (prefers-color-scheme: dark) {
+    .captcha {
+      background-color: var(--ribaunt-background, #171717);
+      border-color: var(--ribaunt-border-color, #454545);
+      color: var(--ribaunt-color, #f4f4f4);
+    }
+
+    .checkbox {
+      background-color: var(--ribaunt-checkbox-background, #242424);
+    }
+
     .logo {
       color: var(--ribaunt-logo-color, #999);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .captcha,
+    .checkbox,
+    .warning,
+    .logo {
+      transition: none !important;
+      animation: none !important;
     }
   }
 
@@ -203,7 +239,35 @@ const RIBAUNT_LOGO = `
   </svg>
 `;
 
-export type WidgetState = 'initial' | 'verifying' | 'done' | 'error';
+export type WidgetState = 'initial' | 'fetching' | 'solving' | 'verifying' | 'done' | 'error';
+export type WidgetErrorCode =
+  | 'aborted'
+  | 'challenge-fetch-failed'
+  | 'invalid-challenge'
+  | 'solve-failed'
+  | 'timeout'
+  | 'verification-failed'
+  | 'worker-unavailable'
+  | 'unknown';
+
+export interface WidgetStateDetail {
+  state: WidgetState;
+  phase: WidgetState;
+  progress: number;
+}
+
+export interface WidgetVerifyDetail {
+  solutions: ChallengeSolution[];
+  phase: 'done';
+  progress: 100;
+}
+
+export interface WidgetErrorDetail {
+  error: string;
+  code: WidgetErrorCode;
+  timeout: boolean;
+  phase: 'error';
+}
 
 function parseTokenArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
@@ -254,6 +318,7 @@ export class RibauntWidget extends HTMLElement {
   private warningElement: HTMLDivElement | null = null;
   private logoElement: HTMLAnchorElement | null = null;
   private autoVerifyStarted = false;
+  private attemptController: AbortController | null = null;
 
   static get observedAttributes() {
     return [
@@ -263,6 +328,9 @@ export class RibauntWidget extends HTMLElement {
       'show-warning',
       'warning-message',
       'solve-timeout',
+      'worker-mode',
+      'challenge-method',
+      'calibrate',
       'disabled',
     ];
   }
@@ -282,6 +350,7 @@ export class RibauntWidget extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this.cancelAttempt();
     this.removeEventListeners();
   }
 
@@ -305,9 +374,9 @@ export class RibauntWidget extends HTMLElement {
       <style>${WIDGET_STYLES}</style>
       <div>
         ${showWarning ? '<div class="warning"></div>' : ''}
-        <div class="captcha" data-state="${this.state}" role="button" tabindex="${disabled ? '-1' : '0'}" aria-disabled="${disabled}" aria-label="${this.getMessage()}">
+        <div class="captcha" data-state="${this.state}" role="button" tabindex="${disabled ? '-1' : '0'}" aria-disabled="${disabled}" aria-label="${this.getMessage()}" aria-busy="${this.isBusy()}">
           <div class="checkbox"></div>
-          <p>${this.getMessage()}</p>
+          <p role="status" aria-live="polite">${this.getMessage()}</p>
           <a class="logo" href="https://ribaunt.com" target="_blank" rel="noopener noreferrer" aria-label="Powered by Ribaunt">
             ${RIBAUNT_LOGO}
           </a>
@@ -329,7 +398,7 @@ export class RibauntWidget extends HTMLElement {
     }
 
     // Update progress CSS variable if verifying
-    if (this.state === 'verifying' && this.captchaElement) {
+    if (this.isBusy() && this.captchaElement) {
       this.captchaElement.style.setProperty('--progress', `${this.progress}%`);
     }
 
@@ -377,13 +446,34 @@ export class RibauntWidget extends HTMLElement {
     switch (this.state) {
       case 'initial':
         return "I'm a human";
+      case 'fetching':
+        return 'Preparing challenge...';
+      case 'solving':
+        return `Solving... ${this.progress}%`;
       case 'verifying':
-        return `Verifying... ${this.progress}%`;
+        return 'Verifying...';
       case 'done':
         return "You're a human";
       case 'error':
         return this.timeoutError ? 'Timed out. Try again.' : 'Error. Try again.';
     }
+  }
+
+  private isBusy(): boolean {
+    return this.state === 'fetching' || this.state === 'solving' || this.state === 'verifying';
+  }
+
+  private getWorkerMode(): WorkerMode {
+    const value = this.getAttribute('worker-mode');
+    return value === 'required' || value === 'disabled' ? value : 'preferred';
+  }
+
+  private shouldCalibrate(): boolean {
+    return this.hasAttribute('calibrate') && this.getAttribute('calibrate') !== 'false';
+  }
+
+  private getChallengeMethod(): 'GET' | 'POST' {
+    return this.getAttribute('challenge-method')?.toUpperCase() === 'POST' ? 'POST' : 'GET';
   }
 
   private getSolveTimeoutMs(): number | undefined {
@@ -430,6 +520,7 @@ export class RibauntWidget extends HTMLElement {
       this.captchaElement.setAttribute('aria-label', this.getMessage());
       this.captchaElement.tabIndex = this.isDisabled() ? -1 : 0;
       this.captchaElement.setAttribute('aria-disabled', String(this.isDisabled()));
+      this.captchaElement.setAttribute('aria-busy', String(this.isBusy()));
     }
     if (this.messageElement) {
       this.messageElement.textContent = this.getMessage();
@@ -442,7 +533,11 @@ export class RibauntWidget extends HTMLElement {
     // Dispatch state change event
     this.dispatchEvent(
       new CustomEvent('state-change', {
-        detail: { state: this.state },
+        detail: {
+          state: this.state,
+          phase: this.state,
+          progress: this.progress,
+        } satisfies WidgetStateDetail,
         bubbles: true,
         composed: true,
       })
@@ -461,15 +556,37 @@ export class RibauntWidget extends HTMLElement {
     }
   }
 
+  private cancelAttempt() {
+    this.attemptController?.abort();
+    this.attemptController = null;
+  }
+
+  private getErrorCode(error: unknown): WidgetErrorCode {
+    if (error instanceof WorkerUnavailableError) return 'worker-unavailable';
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return this.timeoutError ? 'timeout' : 'aborted';
+    }
+    if (!(error instanceof Error)) return 'unknown';
+    if (error.message === 'Failed to fetch challenge') return 'challenge-fetch-failed';
+    if (error.message === 'Verification failed') return 'verification-failed';
+    if (error.message.startsWith('Challenge response') || error.message === 'No challenge tokens available') {
+      return 'invalid-challenge';
+    }
+    if (error.message.includes('solve') || error.message.includes('challenge')) return 'solve-failed';
+    return 'unknown';
+  }
+
   private async verify() {
-    this.setState('verifying');
+    this.cancelAttempt();
+    const controller = new AbortController();
+    this.attemptController = controller;
     this.setProgress(0);
 
     const timeoutMs = this.getSolveTimeoutMs();
-    const controller = timeoutMs ? new AbortController() : undefined;
     const timeoutHandle = timeoutMs
       ? setTimeout(() => {
-          controller?.abort();
+          this.timeoutError = true;
+          controller.abort();
         }, timeoutMs)
       : undefined;
 
@@ -477,11 +594,23 @@ export class RibauntWidget extends HTMLElement {
       const challengeEndpoint = this.getAttribute('challenge-endpoint');
       const verifyEndpoint = this.getAttribute('verify-endpoint');
 
-      // Get challenge tokens
+      this.setState('fetching');
       let tokens: string[] = [];
-      
       if (challengeEndpoint) {
-        const response = await fetch(challengeEndpoint);
+        const method = this.getChallengeMethod();
+        let calibration;
+        if (method === 'POST' && this.shouldCalibrate()) {
+          calibration = await calibrateBrowser();
+        }
+        const request = method === 'POST'
+          ? {
+              method,
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(calibration ? { calibration } : {}),
+              signal: controller.signal,
+            }
+          : { signal: controller.signal };
+        const response = await fetch(challengeEndpoint, request);
         if (!response.ok) throw new Error('Failed to fetch challenge');
         const data = await response.json() as unknown;
         tokens = parseChallengeTokens(data);
@@ -491,17 +620,18 @@ export class RibauntWidget extends HTMLElement {
         throw new Error('No challenge tokens available');
       }
 
-      // Solve challenges using the browser-compatible solver
-      const solutions = await solveChallenge(tokens, (progress) => {
+      this.setState('solving');
+      const solutions = await solveChallengeWithWorker(tokens, (progress) => {
         this.setProgress(progress);
-      }, controller?.signal);
+      }, controller.signal, this.getWorkerMode());
 
-      // Verify solution
+      this.setState('verifying');
       if (verifyEndpoint) {
         const response = await fetch(verifyEndpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tokens, solutions }),
+          signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -511,27 +641,36 @@ export class RibauntWidget extends HTMLElement {
 
       this.setState('done');
       
-      // Dispatch verify event
       this.dispatchEvent(
         new CustomEvent('verify', {
-          detail: { solutions },
+          detail: {
+            solutions,
+            phase: 'done',
+            progress: 100,
+          } satisfies WidgetVerifyDetail,
           bubbles: true,
           composed: true,
         })
       );
     } catch (error) {
-      this.timeoutError = error instanceof DOMException && error.name === 'AbortError';
+      if (controller.signal.aborted && this.attemptController !== controller) return;
+      if (!this.timeoutError) {
+        this.timeoutError = error instanceof DOMException
+          && error.name === 'AbortError'
+          && timeoutMs !== undefined;
+      }
+      const code = this.getErrorCode(error);
       this.setState('error');
-      
-      // Dispatch error event
       this.dispatchEvent(
         new CustomEvent('error', {
           detail: {
             error: this.timeoutError
               ? 'Timed out. Try again.'
               : (error instanceof Error ? error.message : String(error)),
+            code,
             timeout: this.timeoutError,
-          },
+            phase: 'error',
+          } satisfies WidgetErrorDetail,
           bubbles: true,
           composed: true,
         })
@@ -540,6 +679,9 @@ export class RibauntWidget extends HTMLElement {
       if (timeoutHandle !== undefined) {
         clearTimeout(timeoutHandle);
       }
+      if (this.attemptController === controller) {
+        this.attemptController = null;
+      }
     }
   }
 
@@ -547,6 +689,7 @@ export class RibauntWidget extends HTMLElement {
    * Public API: Reset the widget to initial state
    */
   reset() {
+    this.cancelAttempt();
     this.timeoutError = false;
     this.setState('initial');
     this.setProgress(0);
@@ -599,6 +742,9 @@ declare global {
         'show-warning'?: string | boolean;
         'warning-message'?: string;
         'solve-timeout'?: string;
+        'worker-mode'?: WorkerMode;
+        'challenge-method'?: 'GET' | 'POST';
+        calibrate?: string | boolean;
         disabled?: string | boolean;
       };
     }

@@ -1,7 +1,14 @@
 'use client';
 
 import React, { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 'react';
-import type { RibauntWidgetElement, WidgetState } from './widget.js';
+import type {
+  RibauntWidgetElement,
+  WidgetErrorDetail,
+  WidgetState,
+  WidgetStateDetail,
+  WidgetVerifyDetail,
+} from './widget.js';
+import type { WorkerMode } from './worker-client.js';
 
 export interface RibauntWidgetProps extends Omit<React.HTMLAttributes<RibauntWidgetElement>, 'onError' | 'onLoad'> {
   challengeEndpoint?: string;
@@ -10,10 +17,13 @@ export interface RibauntWidgetProps extends Omit<React.HTMLAttributes<RibauntWid
   showWarning?: boolean | string;
   warningMessage?: string;
   solveTimeout?: number | string;
+  workerMode?: WorkerMode;
+  challengeMethod?: 'GET' | 'POST';
+  calibrate?: boolean | string;
   disabled?: boolean | string;
-  onVerify?: (detail: { solutions: any[] }) => void;
-  onError?: (detail: { error: string; timeout?: boolean }) => void;
-  onStateChange?: (detail: { state: WidgetState }) => void;
+  onVerify?: (detail: WidgetVerifyDetail) => void;
+  onError?: (detail: WidgetErrorDetail) => void;
+  onStateChange?: (detail: WidgetStateDetail) => void;
   onReady?: (detail: { state: WidgetState }) => void;
   onLoad?: (detail: { state: WidgetState }) => void;
   onEvent?: (type: 'verify' | 'error' | 'state-change' | 'ready', detail: unknown) => void;
@@ -46,6 +56,9 @@ function syncWidgetProps(
     showWarning,
     warningMessage,
     solveTimeout,
+    workerMode,
+    challengeMethod,
+    calibrate,
     disabled,
     autoVerify,
   }: {
@@ -55,6 +68,9 @@ function syncWidgetProps(
     showWarning: boolean | string | undefined;
     warningMessage: string | undefined;
     solveTimeout: number | string | undefined;
+    workerMode: WorkerMode | undefined;
+    challengeMethod: 'GET' | 'POST' | undefined;
+    calibrate: boolean | string | undefined;
     disabled: boolean | string | undefined;
   }
 ) {
@@ -64,6 +80,9 @@ function syncWidgetProps(
   syncAttribute(element, 'show-warning', showWarning);
   syncAttribute(element, 'warning-message', warningMessage);
   syncAttribute(element, 'solve-timeout', solveTimeout);
+  syncAttribute(element, 'worker-mode', workerMode);
+  syncAttribute(element, 'challenge-method', challengeMethod);
+  syncAttribute(element, 'calibrate', calibrate);
   syncAttribute(element, 'disabled', disabled);
 }
 
@@ -79,6 +98,9 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       showWarning,
       warningMessage,
       solveTimeout,
+      workerMode,
+      challengeMethod,
+      calibrate,
       disabled,
       autoVerify,
       onVerify,
@@ -137,20 +159,20 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       const widget = document.createElement('ribaunt-widget') as RibauntWidgetElement;
 
       const handleVerify = (e: Event) => {
-        const customEvent = e as CustomEvent<{ solutions: any[] }>;
+        const customEvent = e as CustomEvent<WidgetVerifyDetail>;
         callbacksRef.current.onVerify?.(customEvent.detail);
         callbacksRef.current.onEvent?.('verify', customEvent.detail);
       };
 
       const handleError = (e: Event) => {
-        const customEvent = e as CustomEvent<{ error: string }>;
+        const customEvent = e as CustomEvent<WidgetErrorDetail>;
         callbacksRef.current.onError?.(customEvent.detail);
         callbacksRef.current.onEvent?.('error', customEvent.detail);
       };
 
       const handleStateChange = (e: Event) => {
         hasStateEventRef.current = true;
-        const customEvent = e as CustomEvent<{ state: WidgetState }>;
+        const customEvent = e as CustomEvent<WidgetStateDetail>;
         callbacksRef.current.onStateChange?.(customEvent.detail);
         callbacksRef.current.onEvent?.('state-change', customEvent.detail);
       };
@@ -178,6 +200,9 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
         showWarning,
         warningMessage,
         solveTimeout,
+        workerMode,
+        challengeMethod,
+        calibrate,
         disabled,
       });
 
@@ -196,8 +221,13 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       const fallbackTimer = setTimeout(() => {
         if (!hasStateEventRef.current) {
           hasStateEventRef.current = true;
-          callbacksRef.current.onStateChange?.({ state: currentState });
-          callbacksRef.current.onEvent?.('state-change', { state: currentState });
+          const detail: WidgetStateDetail = {
+            state: currentState,
+            phase: currentState,
+            progress: 0,
+          };
+          callbacksRef.current.onStateChange?.(detail);
+          callbacksRef.current.onEvent?.('state-change', detail);
         }
       }, 0);
 
@@ -221,9 +251,23 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
         showWarning,
         warningMessage,
         solveTimeout,
+        workerMode,
+        challengeMethod,
+        calibrate,
         disabled,
       });
-    }, [challengeEndpoint, verifyEndpoint, autoVerify, showWarning, warningMessage, solveTimeout, disabled]);
+    }, [
+      challengeEndpoint,
+      verifyEndpoint,
+      autoVerify,
+      showWarning,
+      warningMessage,
+      solveTimeout,
+      workerMode,
+      challengeMethod,
+      calibrate,
+      disabled,
+    ]);
 
     return isLoading ? null : <div ref={containerRef} />;
   }

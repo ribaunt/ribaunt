@@ -7,7 +7,12 @@ export interface ChallengeSolution {
   hash: string;
 }
 
-interface ChallengePayload {
+export interface BrowserCalibration {
+  iterations: number;
+  durationMs: number;
+}
+
+export interface ChallengePayload {
   challenge: string;
   difficulty: number;
   expires: number;
@@ -51,6 +56,23 @@ async function sha256(message: string): Promise<string> {
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   return hashHex;
+}
+
+export async function calibrateBrowser(iterations = 128): Promise<BrowserCalibration> {
+  if (!Number.isFinite(iterations) || iterations < 1) {
+    throw new Error('Calibration iterations must be at least 1');
+  }
+
+  const normalizedIterations = Math.floor(iterations);
+  const startedAt = performance.now();
+  for (let index = 0; index < normalizedIterations; index++) {
+    await sha256(`ribaunt-calibration:${index}`);
+  }
+
+  return {
+    iterations: normalizedIterations,
+    durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
+  };
 }
 
 /**

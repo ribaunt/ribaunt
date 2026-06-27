@@ -3,9 +3,11 @@
 import { vi, type Mock } from 'vitest';
 
 const mockSolveChallenge = vi.fn();
+const mockCalibrateBrowser = vi.fn();
 
 vi.mock('../src/solver.js', () => ({
   solveChallenge: (...args: unknown[]) => mockSolveChallenge(...args),
+  calibrateBrowser: (...args: unknown[]) => mockCalibrateBrowser(...args),
 }));
 
 import '../src/widget';
@@ -20,6 +22,7 @@ describe('RibauntWidget', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
     mockSolveChallenge.mockReset();
+    mockCalibrateBrowser.mockReset();
     global.fetch = vi.fn() as typeof fetch;
   });
 
@@ -68,8 +71,16 @@ describe('RibauntWidget', () => {
     await flushPromises();
     await flushPromises();
 
-    expect(global.fetch).toHaveBeenNthCalledWith(1, '/challenge');
-    expect(mockSolveChallenge).toHaveBeenCalledWith(['token-1', 'token-2'], expect.any(Function), undefined);
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      1,
+      '/challenge',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(mockSolveChallenge).toHaveBeenCalledWith(
+      ['token-1', 'token-2'],
+      expect.any(Function),
+      expect.any(AbortSignal)
+    );
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
       '/verify',
@@ -80,9 +91,37 @@ describe('RibauntWidget', () => {
     );
     expect(verifyHandler).toHaveBeenCalledTimes(1);
     expect(states).toContain('initial');
+    expect(states).toContain('fetching');
+    expect(states).toContain('solving');
     expect(states).toContain('verifying');
     expect(states).toContain('done');
     expect(widget.shadowRoot?.querySelector('p')?.textContent).toBe("You're a human");
+  });
+
+  it('posts timing-only calibration when explicitly enabled', async () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('challenge-endpoint', '/challenge');
+    widget.setAttribute('challenge-method', 'POST');
+    widget.setAttribute('calibrate', 'true');
+    widget.setAttribute('worker-mode', 'disabled');
+    mockCalibrateBrowser.mockResolvedValue({ iterations: 128, durationMs: 12 });
+    (global.fetch as Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ challenges: ['token-1'] }),
+    });
+    mockSolveChallenge.mockResolvedValue([{ nonce: '1', hash: 'hash-1' }]);
+
+    document.body.appendChild(widget);
+    (widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement).click();
+    await flushPromises();
+    await flushPromises();
+
+    expect(global.fetch).toHaveBeenCalledWith('/challenge', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        calibration: { iterations: 128, durationMs: 12 },
+      }),
+    }));
   });
 
   it('automatically verifies on load when auto-verify is enabled', async () => {
@@ -110,8 +149,16 @@ describe('RibauntWidget', () => {
     await flushPromises();
     await flushPromises();
 
-    expect(global.fetch).toHaveBeenNthCalledWith(1, '/challenge');
-    expect(mockSolveChallenge).toHaveBeenCalledWith(['token-1'], expect.any(Function), undefined);
+    expect(global.fetch).toHaveBeenNthCalledWith(
+      1,
+      '/challenge',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(mockSolveChallenge).toHaveBeenCalledWith(
+      ['token-1'],
+      expect.any(Function),
+      expect.any(AbortSignal)
+    );
     expect(global.fetch).toHaveBeenNthCalledWith(
       2,
       '/verify',
@@ -187,7 +234,11 @@ describe('RibauntWidget', () => {
     await flushPromises();
     await flushPromises();
 
-    expect(mockSolveChallenge).toHaveBeenCalledWith(['token-1'], expect.any(Function), undefined);
+    expect(mockSolveChallenge).toHaveBeenCalledWith(
+      ['token-1'],
+      expect.any(Function),
+      expect.any(AbortSignal)
+    );
     expect(widget.shadowRoot?.querySelector('.captcha')?.getAttribute('data-state')).toBe('done');
   });
 
@@ -207,7 +258,11 @@ describe('RibauntWidget', () => {
     await flushPromises();
     await flushPromises();
 
-    expect(mockSolveChallenge).toHaveBeenCalledWith(['token-1'], expect.any(Function), undefined);
+    expect(mockSolveChallenge).toHaveBeenCalledWith(
+      ['token-1'],
+      expect.any(Function),
+      expect.any(AbortSignal)
+    );
     expect(widget.shadowRoot?.querySelector('.captcha')?.getAttribute('data-state')).toBe('done');
   });
 
@@ -466,7 +521,11 @@ describe('RibauntWidget', () => {
     await flushPromises();
     await flushPromises();
 
-    expect(mockSolveChallenge).toHaveBeenCalledWith(['token-1'], expect.any(Function), undefined);
+    expect(mockSolveChallenge).toHaveBeenCalledWith(
+      ['token-1'],
+      expect.any(Function),
+      expect.any(AbortSignal)
+    );
     expect(widget.shadowRoot?.querySelector('.captcha')?.getAttribute('data-state')).toBe('done');
   });
 

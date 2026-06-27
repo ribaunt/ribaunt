@@ -1,8 +1,19 @@
-import { createChallenge, solveChallenge, verifySolution, LocalReplayStore } from '../src/index';
+import {
+    createChallenge,
+    solveChallenge,
+    verifySolution,
+    selectWorkload,
+    LocalReplayStore,
+} from '../src/index';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import jwt from 'jsonwebtoken';
+import crypto from 'node:crypto';
 
 const originalSecret = process.env.RIBAUNT_SECRET;
+
+const verifyValid = async (...args: Parameters<typeof verifySolution>): Promise<boolean> => {
+    return (await verifySolution(...args)).valid;
+};
 
 beforeEach(() => {
     process.env.RIBAUNT_SECRET ??= 'codex-audit-test-secret-with-enough-entropy';
@@ -20,6 +31,165 @@ afterEach(() => {
 });
 
 describe('test challenge flow', () => {
+    it('creates one challenge by default with the options API', () => {
+        expect(createChallenge({ difficulty: 2 })).toHaveLength(1);
+        expect(createChallenge(2)).toHaveLength(4);
+    });
+
+    it('binds signed challenges to an opaque context digest', async () => {
+        const context = 'signup:user-42:attempt-7';
+        const [token] = createChallenge({ difficulty: 2, context });
+        const solution = solveChallenge(token!);
+        const payload = jwt.decode(token!) as Record<string, unknown>;
+
+        expect(payload.contextHash).toMatch(/^[a-f0-9]{64}$/);
+        expect(JSON.stringify(payload)).not.toContain(context);
+        expect(payload.contextHash).not.toBe(
+            crypto.createHash('sha256').update(context, 'utf8').digest('hex')
+        );
+        await expect(verifySolution(token!, solution!, {
+            context,
+            replayPrevention: 'disabled',
+        })).resolves.toEqual({ valid: true });
+        await expect(verifySolution(token!, solution!, {
+            context: 'wrong-context',
+            replayPrevention: 'disabled',
+        })).resolves.toMatchObject({
+            valid: false,
+            reason: 'context-mismatch',
+        });
+        await expect(verifySolution(token!, solution!, {
+            replayPrevention: 'disabled',
+        })).resolves.toMatchObject({
+            valid: false,
+            reason: 'context-mismatch',
+        });
+    });
+
+    it('rejects unbound challenges when verification requires context', async () => {
+        const [token] = createChallenge(2, 1);
+        const solution = solveChallenge(token!);
+
+        await expect(verifySolution(token!, solution!, {
+            context: 'ignored-for-unbound-token',
+            replayPrevention: 'disabled',
+        })).resolves.toMatchObject({
+            valid: false,
+            reason: 'context-mismatch',
+        });
+    });
+
+    it('uses unlinkable context digests for separate challenges', () => {
+        const context = 'signup:user-42';
+        const [firstToken] = createChallenge({ difficulty: 2, context });
+        const [secondToken] = createChallenge({ difficulty: 2, context });
+        const firstPayload = jwt.decode(firstToken!) as Record<string, unknown>;
+        const secondPayload = jwt.decode(secondToken!) as Record<string, unknown>;
+
+        expect(firstPayload.contextHash).toMatch(/^[a-f0-9]{64}$/);
+        expect(secondPayload.contextHash).toMatch(/^[a-f0-9]{64}$/);
+        expect(firstPayload.contextHash).not.toBe(secondPayload.contextHash);
+    });
+
+    it('rejects empty challenge batches', async () => {
+        await expect(verifySolution([], [], { debug: false })).resolves.toMatchObject({
+            valid: false,
+            reason: 'invalid-solution',
+        });
+    });
+
+    it('rejects signing secrets shorter than 32 bytes', () => {
+        process.env.RIBAUNT_SECRET = 'too-short';
+
+        expect(() => createChallenge({ difficulty: 2 })).toThrow(
+            'RIBAUNT_SECRET must be at least 32 bytes'
+        );
+    });
+
+    it('rejects signed challenge payloads without a replay identifier', async () => {
+        const token = jwt.sign({
+            challenge: 'legacy',
+            difficulty: 1,
+            expires: Math.floor(Date.now() / 1000) + 60,
+        }, process.env.RIBAUNT_SECRET!);
+        const solution = solveChallenge(token);
+
+        await expect(verifySolution(token, solution!, { debug: false })).resolves.toMatchObject({
+            valid: false,
+            reason: 'invalid-token',
+        });
+    });
+
+    it('selects deterministic bounded adaptive workloads', () => {
+        expect(selectWorkload()).toEqual({
+            difficulty: 3,
+            amount: 5,
+            estimatedAttempts: 20_480,
+        });
+        expect(selectWorkload({ riskScore: 0 })).toMatchObject({ difficulty: 3, amount: 1 });
+        expect(selectWorkload({
+            riskScore: 0,
+            calibration: { iterations: 1_000_000, durationMs: 1 },
+        })).toMatchObject({ difficulty: 6, amount: 8 });
+        expect(() => selectWorkload({ riskScore: -1 })).toThrow('Risk score must be between 0 and 100');
+        expect(() => selectWorkload({
+            calibration: { iterations: 0, durationMs: 1 },
+        })).toThrow('Calibration iterations must be at least 1');
+    });
+
+    it('uses an explicit workload when creating an options challenge', () => {
+        const tokens = createChallenge({
+            difficulty: 1,
+            amount: 7,
+            workload: { difficulty: 2, amount: 2 },
+        });
+        const payload = jwt.decode(tokens[0]!) as Record<string, unknown>;
+
+        expect(tokens).toHaveLength(2);
+        expect(payload.difficulty).toBe(2);
+    });
+
+    it('validates all batch proofs before atomically consuming replay keys', async () => {
+        const tokens = createChallenge(2, 2);
+        const solutions = solveChallenge(tokens)!;
+        const replayStore = {
+            consume: vi.fn(async () => true),
+            consumeMany: vi.fn(async () => true),
+        };
+
+        await expect(verifyValid(tokens, [
+            solutions[0]!,
+            { nonce: 'invalid', hash: '' },
+        ], {
+            replayPrevention: 'remote',
+            replayStore,
+            debug: false,
+        })).resolves.toBe(false);
+        expect(replayStore.consume).not.toHaveBeenCalled();
+        expect(replayStore.consumeMany).not.toHaveBeenCalled();
+
+        await expect(verifyValid(tokens, solutions, {
+            replayPrevention: 'remote',
+            replayStore,
+        })).resolves.toBe(true);
+        expect(replayStore.consumeMany).toHaveBeenCalledTimes(1);
+        expect(replayStore.consume).not.toHaveBeenCalled();
+    });
+
+    it('requires atomic remote replay support for challenge batches', async () => {
+        const tokens = createChallenge(2, 2);
+        const solutions = solveChallenge(tokens)!;
+
+        await expect(verifySolution(tokens, solutions, {
+            replayPrevention: 'remote',
+            replayStore: { consume: async () => true },
+            debug: false,
+        })).resolves.toMatchObject({
+            valid: false,
+            reason: 'configuration-error',
+        });
+    });
+
     it('creates the default number of JWT challenge tokens', () => {
         const tokens = createChallenge(2,3);
 
@@ -44,7 +214,7 @@ describe('test challenge flow', () => {
             expect(nonce.length).toBeGreaterThan(0);
         });
 
-                const verification = await verifySolution(tokens, nonces);
+                const verification = await verifyValid(tokens, nonces);
                 expect(verification).toBe(true);
     });
 
@@ -56,13 +226,13 @@ describe('test challenge flow', () => {
         expect(typeof solution?.nonce).toBe('string');
         expect(solution?.nonce.length).toBeGreaterThan(0);
 
-        const isValid = await verifySolution(token, solution!.nonce);
+        const isValid = await verifyValid(token, solution!.nonce);
         expect(isValid).toBe(true);
     });
 
     it('rejects an invalid nonce for a valid token', async () => {
         const [token] = createChallenge(3, 1);
-        const isValid = await verifySolution(token, 'invalid-nonce');
+        const isValid = await verifyValid(token, 'invalid-nonce');
         expect(isValid).toBe(false);
     });
 
@@ -71,7 +241,7 @@ describe('test challenge flow', () => {
         const tamperedToken = `${token}tampered`;
         const solution = solveChallenge(token);
 
-        const isValid = solution ? await verifySolution(tamperedToken, solution.nonce, { debug: false }) : false;
+        const isValid = solution ? await verifyValid(tamperedToken, solution.nonce, { debug: false }) : false;
         expect(isValid).toBe(false);
     });
 
@@ -117,7 +287,7 @@ describe('test challenge flow', () => {
 
     it('marks mismatched nonce arrays as invalid', async () => {
         const tokens = createChallenge(3, 2);
-        const verification = await verifySolution(tokens, ['only-one-nonce']);
+        const verification = await verifyValid(tokens, ['only-one-nonce']);
 
         expect(verification).toBe(false);
     });
@@ -133,18 +303,18 @@ describe('test challenge flow', () => {
         vi.setSystemTime(new Date('2026-01-01T00:00:03Z'));
 
         expect(solution).toBeTruthy();
-        await expect(verifySolution(token, solution!.nonce)).resolves.toBe(false);
+        await expect(verifyValid(token, solution!.nonce)).resolves.toBe(false);
     });
 
     it('returns false for malformed tokens during verification', async () => {
-        await expect(verifySolution('not-a-jwt', '123', { debug: false })).resolves.toBe(false);
-        await expect(verifySolution(['still-not-a-jwt'], ['123'], { debug: false })).resolves.toBe(false);
+        await expect(verifyValid('not-a-jwt', '123', { debug: false })).resolves.toBe(false);
+        await expect(verifyValid(['still-not-a-jwt'], ['123'], { debug: false })).resolves.toBe(false);
     });
 
     it('emits debug warnings to console when enabled', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-        await expect(verifySolution('not-a-jwt', '123', { debug: true })).resolves.toBe(false);
+        await expect(verifyValid('not-a-jwt', '123', { debug: true })).resolves.toBe(false);
 
         expect(warn).toHaveBeenCalledWith('[ribaunt] verifySolution rejected a token or nonce', expect.any(String));
         warn.mockRestore();
@@ -155,7 +325,7 @@ describe('test challenge flow', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         process.env.NODE_ENV = 'development';
 
-        await expect(verifySolution('not-a-jwt', '123')).resolves.toBe(false);
+        await expect(verifyValid('not-a-jwt', '123')).resolves.toBe(false);
 
         expect(warn).toHaveBeenCalled();
         warn.mockRestore();
@@ -170,7 +340,7 @@ describe('test challenge flow', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const [token] = createChallenge(2, 1, 30);
 
-        await expect(verifySolution(token, null as never, { debug: true })).resolves.toBe(false);
+        await expect(verifyValid(token, null as never, { debug: true })).resolves.toBe(false);
 
         expect(warn).toHaveBeenCalledWith('[ribaunt] verifySolution received an empty nonce', '');
         warn.mockRestore();
@@ -186,7 +356,7 @@ describe('test challenge flow', () => {
             },
         };
 
-        await expect(verifySolution(token, solution!.nonce, {
+        await expect(verifyValid(token, solution!.nonce, {
             replayPrevention: 'remote',
             replayStore,
             debug: true,
@@ -206,7 +376,7 @@ describe('test challenge flow', () => {
             },
         };
 
-        await expect(verifySolution(token, solution!.nonce, {
+        await expect(verifyValid(token, solution!.nonce, {
             replayPrevention: 'remote',
             replayStore,
             debug: true,
@@ -225,7 +395,7 @@ describe('test challenge flow', () => {
             exp: Math.floor(Date.now() / 1000) - 1,
         }, process.env.RIBAUNT_SECRET!);
 
-        await expect(verifySolution(token, '1', { onWarning, debug: false })).resolves.toBe(false);
+        await expect(verifyValid(token, '1', { onWarning, debug: false })).resolves.toBe(false);
 
         expect(onWarning).toHaveBeenCalledWith(expect.objectContaining({
             reason: 'expired-token',
@@ -235,7 +405,7 @@ describe('test challenge flow', () => {
     it('emits warning callbacks for malformed tokens without requiring debug logs', async () => {
         const onWarning = vi.fn();
 
-        await expect(verifySolution('not-a-jwt', '123', {
+        await expect(verifyValid('not-a-jwt', '123', {
             debug: false,
             onWarning,
         })).resolves.toBe(false);
@@ -252,13 +422,13 @@ describe('test challenge flow', () => {
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
-        await expect(verifySolution(token, solution!.nonce, {
+        await expect(verifyValid(token, solution!.nonce, {
             replayPrevention: 'local',
             onWarning,
             debug: false,
         })).resolves.toBe(true);
 
-        await expect(verifySolution(token, solution!.nonce, {
+        await expect(verifyValid(token, solution!.nonce, {
             replayPrevention: 'local',
             onWarning,
             debug: false,
@@ -278,7 +448,7 @@ describe('test challenge flow', () => {
 
         vi.setSystemTime(new Date('2026-01-01T00:00:03Z'));
 
-        await expect(verifySolution(token, solution!.nonce, { onWarning, debug: false })).resolves.toBe(false);
+        await expect(verifyValid(token, solution!.nonce, { onWarning, debug: false })).resolves.toBe(false);
         expect(onWarning).toHaveBeenCalledWith(expect.objectContaining({
             reason: 'expired-token',
         }));
@@ -287,14 +457,14 @@ describe('test challenge flow', () => {
     it('rejects invalid nonce payload shapes', async () => {
         const [token] = createChallenge(2, 1, 30);
 
-        await expect(verifySolution(token, { nonce: '', hash: '' })).resolves.toBe(false);
-        await expect(verifySolution(token, { nonce: null } as never)).resolves.toBe(false);
-        await expect(verifySolution([token], [{ nonce: '', hash: '' }])).resolves.toBe(false);
-        await expect(verifySolution(token, undefined as never)).resolves.toBe(false);
-        await expect(verifySolution(token, [])).resolves.toBe(false);
-        await expect(verifySolution(token, [undefined as never])).resolves.toBe(false);
-        await expect(verifySolution([token], '1' as never)).resolves.toBe(false);
-        await expect(verifySolution([undefined as never], ['1'])).resolves.toBe(false);
+        await expect(verifyValid(token, { nonce: '', hash: '' })).resolves.toBe(false);
+        await expect(verifyValid(token, { nonce: null } as never)).resolves.toBe(false);
+        await expect(verifyValid([token], [{ nonce: '', hash: '' }])).resolves.toBe(false);
+        await expect(verifyValid(token, undefined as never)).resolves.toBe(false);
+        await expect(verifyValid(token, [])).resolves.toBe(false);
+        await expect(verifyValid(token, [undefined as never])).resolves.toBe(false);
+        await expect(verifyValid([token], '1' as never)).resolves.toBe(false);
+        await expect(verifyValid([undefined as never], ['1'])).resolves.toBe(false);
     });
 
     it('accepts solution object arrays and single-item nonce arrays', async () => {
@@ -304,13 +474,13 @@ describe('test challenge flow', () => {
         const singleSolution = solveChallenge(singleToken);
 
         expect(Array.isArray(solutions)).toBe(true);
-        await expect(verifySolution(tokens, solutions as NonNullable<typeof solutions>, {
+        await expect(verifyValid(tokens, solutions as NonNullable<typeof solutions>, {
             replayPrevention: 'disabled',
         })).resolves.toBe(true);
-        await expect(verifySolution(singleToken, [singleSolution!.nonce], {
+        await expect(verifyValid(singleToken, [singleSolution!.nonce], {
             replayPrevention: 'disabled',
         })).resolves.toBe(true);
-        await expect(verifySolution(singleToken, [singleSolution!], {
+        await expect(verifyValid(singleToken, [singleSolution!], {
             replayPrevention: 'disabled',
         })).resolves.toBe(true);
     });
@@ -320,7 +490,7 @@ describe('test challenge flow', () => {
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
-        await expect(verifySolution(token, Number(solution!.nonce), {
+        await expect(verifyValid(token, Number(solution!.nonce), {
             replayPrevention: 'disabled',
         })).resolves.toBe(true);
     });
@@ -330,8 +500,8 @@ describe('test challenge flow', () => {
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
-        await expect(verifySolution(token, solution!.nonce)).resolves.toBe(true);
-        await expect(verifySolution(token, solution!.nonce)).resolves.toBe(false);
+        await expect(verifyValid(token, solution!.nonce)).resolves.toBe(true);
+        await expect(verifyValid(token, solution!.nonce)).resolves.toBe(false);
     });
 
     it('allows repeated submissions only when replay prevention is explicitly disabled', async () => {
@@ -339,8 +509,8 @@ describe('test challenge flow', () => {
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
-        await expect(verifySolution(token, solution!.nonce, { replayPrevention: 'disabled' })).resolves.toBe(true);
-        await expect(verifySolution(token, solution!.nonce, { replayPrevention: 'disabled' })).resolves.toBe(true);
+        await expect(verifyValid(token, solution!.nonce, { replayPrevention: 'disabled' })).resolves.toBe(true);
+        await expect(verifyValid(token, solution!.nonce, { replayPrevention: 'disabled' })).resolves.toBe(true);
     });
 
     it('keeps local replay prevention behavior explicit', async () => {
@@ -348,8 +518,8 @@ describe('test challenge flow', () => {
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
-        await expect(verifySolution(token, solution!.nonce, { replayPrevention: 'local' })).resolves.toBe(true);
-        await expect(verifySolution(token, solution!.nonce, { replayPrevention: 'local' })).resolves.toBe(false);
+        await expect(verifyValid(token, solution!.nonce, { replayPrevention: 'local' })).resolves.toBe(true);
+        await expect(verifyValid(token, solution!.nonce, { replayPrevention: 'local' })).resolves.toBe(false);
     });
 
     it('supports custom remote replay stores', async () => {
@@ -369,11 +539,11 @@ describe('test challenge flow', () => {
         };
 
         expect(solution).toBeTruthy();
-        await expect(verifySolution(token, solution!.nonce, {
+        await expect(verifyValid(token, solution!.nonce, {
             replayPrevention: 'remote',
             replayStore: remoteStore,
         })).resolves.toBe(true);
-        await expect(verifySolution(token, solution!.nonce, {
+        await expect(verifyValid(token, solution!.nonce, {
             replayPrevention: 'remote',
             replayStore: remoteStore,
         })).resolves.toBe(false);
@@ -397,7 +567,7 @@ describe('test challenge flow', () => {
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
-        await expect(verifySolution(token, solution!.nonce, {
+        await expect(verifyValid(token, solution!.nonce, {
             replayPrevention: 'remote',
         })).resolves.toBe(false);
     });
@@ -415,7 +585,7 @@ describe('test challenge flow', () => {
         delete process.env.RIBAUNT_SECRET;
 
         expect(() => createChallenge(1, 1, 30)).toThrow('RIBAUNT_SECRET environment variable is not set!');
-        await expect(verifySolution('not-a-real-token', '1', { debug: false })).resolves.toBe(false);
+        await expect(verifyValid('not-a-real-token', '1', { debug: false })).resolves.toBe(false);
     });
 
     it('can use an isolated local replay store instance', async () => {
@@ -429,12 +599,12 @@ describe('test challenge flow', () => {
             consume: (jti: string, expiresAt: number) => localStore.consume(jti, expiresAt),
         };
 
-        await expect(verifySolution(token, solution!.nonce, {
+        await expect(verifyValid(token, solution!.nonce, {
             replayPrevention: 'remote',
             replayStore: adapter,
         })).resolves.toBe(true);
 
-        await expect(verifySolution(token, solution!.nonce, {
+        await expect(verifyValid(token, solution!.nonce, {
             replayPrevention: 'remote',
             replayStore: adapter,
         })).resolves.toBe(false);

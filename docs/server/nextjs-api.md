@@ -4,7 +4,7 @@ If you are using Next.js, handling challenge generation and verification via Nex
 
 ## 1. Environment Variable Setup
 
-In your `.env.local` file, define the `RIBAUNT_SECRET`.
+In your `.env.local` file, define a random `RIBAUNT_SECRET` containing at least 32 UTF-8 bytes.
 
 ```env
 # Server-side ONLY! Do NOT prefix with NEXT_PUBLIC_
@@ -59,14 +59,14 @@ export async function POST(req: Request) {
     }
 
     // The default replay mode blocks token reuse in this process.
-    const isValid = await verifySolution(tokens, solutions, {
+    const result = await verifySolution(tokens, solutions, {
       onWarning: (warning) => {
         // Optional telemetry hook without enabling debug logs
         console.log('captcha warning', warning.reason, warning.message);
       },
     });
 
-    if (isValid) {
+    if (result.valid) {
       // You might also set a secure HTTP-only cookie here to track verification
       return NextResponse.json({ success: true, message: 'Verification successful' });
     }
@@ -129,14 +129,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // The default replay mode blocks token reuse in this process.
-    const isValid = await verifySolution(tokens, solutions, {
+    const result = await verifySolution(tokens, solutions, {
       onWarning: (warning) => {
         // Optional telemetry hook without enabling debug logs
         console.log('captcha warning', warning.reason, warning.message);
       },
     });
 
-    if (isValid) {
+    if (result.valid) {
       res.status(200).json({ success: true, message: 'Verification successful' });
     } else {
       res.status(400).json({ success: false, error: 'Invalid or expired CAPTCHA solution' });

@@ -6,6 +6,7 @@ interface ChallengeTokenPayload {
   difficulty: number;
   expires: number;
   jti?: string;
+  contextHash?: string;
 }
 
 export type ChallengeToken = string;
@@ -15,8 +16,41 @@ export interface ChallengeSolution {
   hash: string;
 }
 
+export interface ClientCalibration {
+  iterations: number;
+  durationMs: number;
+}
+
+export interface WorkloadBounds {
+  minDifficulty?: number;
+  maxDifficulty?: number;
+  minAmount?: number;
+  maxAmount?: number;
+}
+
+export interface AdaptiveWorkloadOptions extends WorkloadBounds {
+  riskScore?: number;
+  targetDurationMs?: number;
+  calibration?: ClientCalibration;
+}
+
+export interface Workload {
+  difficulty: number;
+  amount: number;
+  estimatedAttempts: number;
+}
+
+export interface ChallengeOptions {
+  difficulty?: number;
+  amount?: number;
+  ttlSeconds?: number;
+  context?: string;
+  workload?: Pick<Workload, 'difficulty' | 'amount'>;
+}
+
 export interface ReplayStore {
   consume(jti: string, expiresAt: number): Promise<boolean>;
+  consumeMany?(jtis: string[], expiresAt: number): Promise<boolean>;
 }
 
 export type ReplayPreventionMode = 'disabled' | 'local' | 'remote';
@@ -24,22 +58,30 @@ export type ReplayPreventionMode = 'disabled' | 'local' | 'remote';
 export interface VerifySolutionOptions {
   replayPrevention?: ReplayPreventionMode;
   replayStore?: ReplayStore;
+  context?: string;
   debug?: boolean;
   onWarning?: (warning: VerifyWarning) => void;
 }
 
-export type VerifyWarningReason =
+export type VerifyFailureReason =
   | 'invalid-token'
   | 'expired-token'
   | 'invalid-solution'
+  | 'context-mismatch'
   | 'replay-detected'
   | 'configuration-error';
+
+export type VerifyWarningReason = VerifyFailureReason;
 
 export interface VerifyWarning {
   reason: VerifyWarningReason;
   message: string;
   error?: unknown;
 }
+
+export type VerifySolutionResult =
+  | { valid: true }
+  | { valid: false; reason: VerifyFailureReason; message: string };
 
 export interface SolveChallengeOptions {
   maxIterations?: number;
@@ -50,233 +92,225 @@ export class LocalReplayStore implements ReplayStore {
   private usedTokens = new Map<string, number>();
 
   async consume(jti: string, expiresAt: number): Promise<boolean> {
+    return this.consumeMany([jti], expiresAt);
+  }
+
+  async consumeMany(jtis: string[], expiresAt: number): Promise<boolean> {
     this.cleanup();
 
-    if (this.usedTokens.has(jti)) {
+    if (new Set(jtis).size !== jtis.length || jtis.some((jti) => this.usedTokens.has(jti))) {
       return false;
     }
 
-    this.usedTokens.set(jti, expiresAt);
+    for (const jti of jtis) {
+      this.usedTokens.set(jti, expiresAt);
+    }
     return true;
   }
 
   private cleanup(): void {
     const now = Math.floor(Date.now() / 1000);
-
     for (const [jti, expiresAt] of this.usedTokens.entries()) {
-      if (expiresAt < now) {
-        this.usedTokens.delete(jti);
-      }
+      if (expiresAt < now) this.usedTokens.delete(jti);
     }
   }
 }
 
 const defaultLocalReplayStore = new LocalReplayStore();
 const DEFAULT_SOLVE_MAX_DURATION_MS = 30_000;
+const DEFAULT_BOUNDS = {
+  minDifficulty: 3,
+  maxDifficulty: 6,
+  minAmount: 1,
+  maxAmount: 8,
+};
 
-function generateChallenge(length = 8): string {
-  const buffer = crypto.randomBytes(length);
-  return buffer.toString('base64').slice(0, length);
+function assertFiniteInteger(value: number, name: string, minimum: number): number {
+  if (!Number.isFinite(value)) throw new Error(`${name} must be a finite number`);
+  const normalized = Math.floor(value);
+  if (normalized < minimum) throw new Error(`${name} must be at least ${minimum}`);
+  return normalized;
 }
 
-function createChallengePayload(difficulty: number, ttlSeconds: number): ChallengeTokenPayload {
-  return {
-    challenge: generateChallenge(),
-    difficulty,
-    expires: Math.floor(Date.now() / 1000) + ttlSeconds,
-    jti: crypto.randomUUID(),
-  };
+function isValidPayload(payload: unknown): payload is ChallengeTokenPayload {
+  if (!payload || typeof payload !== 'object') return false;
+  const value = payload as Partial<ChallengeTokenPayload>;
+  return typeof value.challenge === 'string'
+    && value.challenge.length > 0
+    && typeof value.difficulty === 'number'
+    && Number.isInteger(value.difficulty)
+    && value.difficulty >= 1
+    && value.difficulty <= 64
+    && typeof value.expires === 'number'
+    && Number.isInteger(value.expires)
+    && typeof value.jti === 'string'
+    && value.jti.length > 0
+    && (value.contextHash === undefined || /^[a-f0-9]{64}$/.test(value.contextHash));
+}
+
+function assertRange(value: number, name: string, minimum: number, maximum: number): number {
+  if (!Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} must be between ${minimum} and ${maximum}`);
+  }
+  return value;
+}
+
+function normalizeBounds(options: WorkloadBounds) {
+  const minDifficulty = assertFiniteInteger(
+    options.minDifficulty ?? DEFAULT_BOUNDS.minDifficulty,
+    'Minimum difficulty',
+    1
+  );
+  const maxDifficulty = assertFiniteInteger(
+    options.maxDifficulty ?? DEFAULT_BOUNDS.maxDifficulty,
+    'Maximum difficulty',
+    minDifficulty
+  );
+  const minAmount = assertFiniteInteger(options.minAmount ?? DEFAULT_BOUNDS.minAmount, 'Minimum amount', 1);
+  const maxAmount = assertFiniteInteger(
+    options.maxAmount ?? DEFAULT_BOUNDS.maxAmount,
+    'Maximum amount',
+    minAmount
+  );
+  return { minDifficulty, maxDifficulty, minAmount, maxAmount };
+}
+
+function closestWorkload(targetAttempts: number, bounds: ReturnType<typeof normalizeBounds>): Workload {
+  let best: Workload | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let difficulty = bounds.minDifficulty; difficulty <= bounds.maxDifficulty; difficulty++) {
+    for (let amount = bounds.minAmount; amount <= bounds.maxAmount; amount++) {
+      const estimatedAttempts = (16 ** difficulty) * amount;
+      const distance = Math.abs(Math.log(estimatedAttempts / targetAttempts));
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = { difficulty, amount, estimatedAttempts };
+      }
+    }
+  }
+
+  return best!;
+}
+
+/**
+ * Selects bounded proof-of-work using a server-owned risk floor and untrusted timing calibration.
+ */
+export function selectWorkload(options: AdaptiveWorkloadOptions = {}): Workload {
+  const bounds = normalizeBounds(options);
+  const riskScore = assertRange(options.riskScore ?? 50, 'Risk score', 0, 100);
+  const targetDurationMs = assertFiniteInteger(
+    options.targetDurationMs ?? 750,
+    'Target duration',
+    1
+  );
+
+  const minimumAttempts = 16 ** bounds.minDifficulty
+    * (bounds.minAmount + (bounds.maxAmount - bounds.minAmount) * (riskScore / 100));
+
+  let targetAttempts = minimumAttempts;
+  const calibration = options.calibration;
+  if (calibration) {
+    const iterations = assertFiniteInteger(calibration.iterations, 'Calibration iterations', 1);
+    const durationMs = assertFiniteInteger(calibration.durationMs, 'Calibration duration', 1);
+    const calibratedAttempts = (iterations / durationMs) * targetDurationMs;
+    targetAttempts = Math.max(minimumAttempts, calibratedAttempts);
+  }
+
+  const maximumAttempts = (16 ** bounds.maxDifficulty) * bounds.maxAmount;
+  return closestWorkload(Math.min(targetAttempts, maximumAttempts), bounds);
+}
+
+function generateChallenge(length = 8): string {
+  return crypto.randomBytes(length).toString('base64url').slice(0, length);
+}
+
+function hashContext(context: string, jti: string): string {
+  return crypto
+    .createHmac('sha256', getSecret())
+    .update(jti, 'utf8')
+    .update('\0')
+    .update(context, 'utf8')
+    .digest('hex');
 }
 
 let cachedSecret: string | undefined;
-
 function getSecret(): string {
   const secret = process.env.RIBAUNT_SECRET;
-
   if (!secret) {
     cachedSecret = undefined;
     throw new Error('RIBAUNT_SECRET environment variable is not set!');
   }
-
-  if (cachedSecret === secret) {
-    return cachedSecret;
+  if (Buffer.byteLength(secret, 'utf8') < 32) {
+    cachedSecret = undefined;
+    throw new Error('RIBAUNT_SECRET must be at least 32 bytes');
   }
-
-  cachedSecret = secret;
+  if (cachedSecret !== secret) cachedSecret = secret;
   return cachedSecret;
 }
 
-function shouldDebugVerifyErrors(options?: VerifySolutionOptions): boolean {
-  if (options?.debug !== undefined) {
-    return options.debug;
-  }
-
-  return process.env.NODE_ENV === 'development';
-}
-
-function logVerifyWarning(message: string, options?: VerifySolutionOptions, error?: unknown): void {
-  const warning: VerifyWarning = {
-    reason: classifyVerifyWarningReason(error),
-    message,
-    error,
+function createSingleChallenge(
+  difficulty: number,
+  ttlSeconds: number,
+  context?: string
+): ChallengeToken {
+  const jti = crypto.randomUUID();
+  const payload: ChallengeTokenPayload = {
+    challenge: generateChallenge(),
+    difficulty,
+    expires: Math.floor(Date.now() / 1000) + ttlSeconds,
+    jti,
   };
-
-  options?.onWarning?.(warning);
-
-  if (!shouldDebugVerifyErrors(options)) {
-    return;
-  }
-
-  const details = error instanceof Error ? error.message : error;
-  console.warn(`[ribaunt] ${message}`, details ?? '');
+  if (context !== undefined) payload.contextHash = hashContext(context, jti);
+  return jwt.sign(payload, getSecret());
 }
 
-function emitVerifyWarning(
-  reason: VerifyWarningReason,
-  message: string,
-  options?: VerifySolutionOptions
-): void {
-  options?.onWarning?.({ reason, message });
-
-  if (!shouldDebugVerifyErrors(options)) {
-    return;
+export function createChallenge(
+  difficulty?: number,
+  amount?: number,
+  ttlSeconds?: number
+): ChallengeToken[];
+export function createChallenge(options: ChallengeOptions): ChallengeToken[];
+export function createChallenge(
+  difficultyOrOptions: number | ChallengeOptions = 5,
+  amount = 4,
+  ttlSeconds = 30
+): ChallengeToken[] {
+  const options = typeof difficultyOrOptions === 'object' ? difficultyOrOptions : undefined;
+  const difficulty = assertFiniteInteger(
+    options?.workload?.difficulty ?? options?.difficulty
+      ?? (typeof difficultyOrOptions === 'number' ? difficultyOrOptions : 5),
+    'Challenge difficulty',
+    1
+  );
+  if (difficulty > 64) throw new Error('Challenge difficulty must be at most 64');
+  const normalizedAmount = assertFiniteInteger(
+    options?.workload?.amount ?? options?.amount ?? (options ? 1 : amount),
+    'Challenge amount',
+    1
+  );
+  const ttlValue = options?.ttlSeconds ?? (options ? 30 : ttlSeconds);
+  if (Number.isFinite(ttlValue) && Math.floor(ttlValue) < 1) {
+    throw new Error('Challenge TTL must be at least 1 second');
   }
+  const normalizedTtl = assertFiniteInteger(ttlValue, 'Challenge TTL', 1);
 
-  console.warn(`[ribaunt] ${message}`, '');
-}
-
-function classifyVerifyWarningReason(error: unknown): VerifyWarningReason {
-  if (error && typeof error === 'object' && 'name' in error) {
-    const name = String((error as { name?: unknown }).name);
-
-    if (name === 'TokenExpiredError') {
-      return 'expired-token';
-    }
-
-    if (name === 'JsonWebTokenError' || name === 'NotBeforeError') {
-      return 'invalid-token';
-    }
-  }
-
-  if (error instanceof Error && error.message.includes('replayStore')) {
-    return 'configuration-error';
-  }
-
-  return 'invalid-token';
+  return Array.from(
+    { length: normalizedAmount },
+    () => createSingleChallenge(difficulty, normalizedTtl, options?.context)
+  );
 }
 
 function normalizeMaxIterations(options?: SolveChallengeOptions): number | undefined {
-  if (options?.maxIterations === undefined) {
-    return undefined;
-  }
-
-  if (!Number.isFinite(options.maxIterations)) {
-    return undefined;
-  }
-
+  if (options?.maxIterations === undefined || !Number.isFinite(options.maxIterations)) return undefined;
   return Math.max(0, Math.floor(options.maxIterations));
 }
 
 function normalizeMaxDurationMs(options?: SolveChallengeOptions): number {
-  if (options?.maxDurationMs === undefined) {
+  if (options?.maxDurationMs === undefined || !Number.isFinite(options.maxDurationMs)) {
     return DEFAULT_SOLVE_MAX_DURATION_MS;
   }
-
-  if (!Number.isFinite(options.maxDurationMs)) {
-    return DEFAULT_SOLVE_MAX_DURATION_MS;
-  }
-
   return Math.max(0, Math.floor(options.maxDurationMs));
-}
-
-function getReplayStore(options?: VerifySolutionOptions): ReplayStore | undefined {
-  const mode = options?.replayPrevention ?? 'local';
-
-  if (mode === 'disabled') {
-    return undefined;
-  }
-
-  if (mode === 'local') {
-    return defaultLocalReplayStore;
-  }
-
-  if (!options?.replayStore) {
-    throw new Error('A replayStore is required when replayPrevention is set to "remote"');
-  }
-
-  return options.replayStore;
-}
-
-function signChallenge(payload: ChallengeTokenPayload): ChallengeToken {
-  return jwt.sign(payload, getSecret());
-}
-
-function assertValidAmount(amount: number): number {
-  if (!Number.isFinite(amount)) {
-    throw new Error('Challenge amount must be a finite number');
-  }
-
-  const normalized = Math.floor(amount);
-  if (normalized < 1) {
-    throw new Error('Challenge amount must be at least 1');
-  }
-
-  return normalized;
-}
-
-function assertValidDifficulty(difficulty: number): number {
-  if (!Number.isFinite(difficulty)) {
-    throw new Error('Challenge difficulty must be a finite number');
-  }
-
-  const normalized = Math.floor(difficulty);
-  if (normalized < 1) {
-    throw new Error('Challenge difficulty must be at least 1');
-  }
-
-  return normalized;
-}
-
-function assertValidTtl(ttlSeconds: number): number {
-  if (!Number.isFinite(ttlSeconds)) {
-    throw new Error('Challenge TTL must be a finite number');
-  }
-
-  const normalized = Math.floor(ttlSeconds);
-  if (normalized < 1) {
-    throw new Error('Challenge TTL must be at least 1 second');
-  }
-
-  return normalized;
-}
-
-function createSingleChallenge(difficulty: number, ttlSeconds: number): ChallengeToken {
-  const payload = createChallengePayload(difficulty, ttlSeconds);
-  return signChallenge(payload);
-}
-
-/**
- * Creates one or more PoW challenges and returns them as signed JWT tokens.
- *
- * @param difficulty - Number of leading zeros required in the hash (default 5)
- * @param amount - Number of challenges to create (default 4)
- * @param ttlSeconds - Time to live for each challenge in seconds (default 30)
- * @returns An array of JWT challenge tokens
- */
-export function createChallenge(
-  difficulty: number = 5,
-  amount: number = 4,
-  ttlSeconds: number = 30
-): ChallengeToken[] {
-  const normalizedDifficulty = assertValidDifficulty(difficulty);
-  const normalizedAmount = assertValidAmount(amount);
-  const normalizedTtl = assertValidTtl(ttlSeconds);
-
-  const challenges = Array.from(
-    { length: normalizedAmount },
-    () => createSingleChallenge(normalizedDifficulty, normalizedTtl)
-  );
-  return challenges;
 }
 
 function solveSingleChallenge(
@@ -286,191 +320,176 @@ function solveSingleChallenge(
   try {
     const payload = jwt.decode(token) as ChallengeTokenPayload | null;
     if (!payload) return undefined;
-
-    const { challenge, difficulty } = payload;
-    const prefix = '0'.repeat(difficulty);
+    const prefix = '0'.repeat(payload.difficulty);
     const maxIterations = normalizeMaxIterations(options);
     const maxDurationMs = normalizeMaxDurationMs(options);
     const startedAt = Date.now();
 
-    let nonce = 0;
-    while (true) {
-      if (maxIterations !== undefined && nonce >= maxIterations) {
-        return undefined;
-      }
-
-      if (Date.now() - startedAt >= maxDurationMs) {
-        return undefined;
-      }
-
-      const hash = crypto
-        .createHash('sha256')
-        .update(`${challenge}${nonce}`)
-        .digest('hex');
-
-      if (hash.startsWith(prefix)) {
-        return { nonce: String(nonce), hash };
-      }
-
-      nonce++;
+    for (let nonce = 0; ; nonce++) {
+      if (maxIterations !== undefined && nonce >= maxIterations) return undefined;
+      if (Date.now() - startedAt >= maxDurationMs) return undefined;
+      const hash = crypto.createHash('sha256').update(`${payload.challenge}${nonce}`).digest('hex');
+      if (hash.startsWith(prefix)) return { nonce: String(nonce), hash };
     }
-  } catch (err) {
+  } catch {
     return undefined;
   }
 }
 
-async function verifySingleSolution(
-  token: ChallengeToken,
-  nonce: number | string | undefined,
-  options?: VerifySolutionOptions
-): Promise<boolean> {
-  if (nonce === undefined || nonce === null || nonce === '') {
-    emitVerifyWarning('invalid-solution', 'verifySolution received an empty nonce', options);
-    return false;
-  }
-
-  try {
-    const replayStore = getReplayStore(options);
-    const payload = jwt.verify(token, getSecret()) as ChallengeTokenPayload;
-
-    const now = Math.floor(Date.now() / 1000);
-    if (payload.expires < now) {
-      emitVerifyWarning('expired-token', 'verifySolution rejected an expired challenge token', options);
-      return false;
-    }
-
-    const nonceValue = typeof nonce === 'number' ? String(nonce) : nonce;
-    const hash = crypto
-      .createHash('sha256')
-      .update(`${payload.challenge}${nonceValue}`)
-      .digest('hex');
-
-    const prefix = '0'.repeat(payload.difficulty);
-    const isValid = hash.startsWith(prefix);
-    if (!isValid) {
-      emitVerifyWarning('invalid-solution', 'verifySolution rejected an invalid nonce', options);
-      return false;
-    }
-
-    if (replayStore && payload.jti) {
-      const consumed = await replayStore.consume(payload.jti, payload.expires);
-      if (!consumed) {
-        emitVerifyWarning('replay-detected', 'verifySolution rejected a replayed token', options);
-        return false;
-      }
-    }
-
-    return true;
-  } catch (err) {
-    logVerifyWarning('verifySolution rejected a token or nonce', options, err);
-    return false;
-  }
-}
-
-/**
- * Solves one or more PoW challenges encoded in JWT tokens.
- *
- * @param token - The JWT challenge token or an array of tokens
- * @param options - Optional guardrails for test/debug usage (`maxIterations`, `maxDurationMs`)
- * @returns The nonce/hash pair for single input or an array of them for multiple tokens
- */
-export function solveChallenge(token: ChallengeToken): ChallengeSolution | undefined;
-export function solveChallenge(
-  token: ChallengeToken,
-  options?: SolveChallengeOptions
-): ChallengeSolution | undefined;
-export function solveChallenge(token: ChallengeToken[]): ChallengeSolution[] | undefined;
-export function solveChallenge(
-  token: ChallengeToken[],
-  options?: SolveChallengeOptions
-): ChallengeSolution[] | undefined;
+export function solveChallenge(token: ChallengeToken, options?: SolveChallengeOptions): ChallengeSolution | undefined;
+export function solveChallenge(token: ChallengeToken[], options?: SolveChallengeOptions): ChallengeSolution[] | undefined;
 export function solveChallenge(
   token: ChallengeToken | ChallengeToken[],
   options?: SolveChallengeOptions
 ): ChallengeSolution | ChallengeSolution[] | undefined {
   if (Array.isArray(token)) {
     const solutions: ChallengeSolution[] = [];
-
-    for (const singleToken of token) {
-      const solution = solveSingleChallenge(singleToken, options);
-      if (!solution) {
-        return undefined;
-      }
-
+    for (const item of token) {
+      const solution = solveSingleChallenge(item, options);
+      if (!solution) return undefined;
       solutions.push(solution);
     }
-
     return solutions;
   }
-
-  const solution = solveSingleChallenge(token, options);
-  return solution;
+  return solveSingleChallenge(token, options);
 }
 
-/**
- * Verifies a PoW solution returned by the client.
- *
- * @param token - The original JWT issued as the challenge (single token or array of tokens)
- * @param nonce - The nonce/answer submitted by the client (single nonce, array of nonces, or array of solution objects)
- * @returns true only if every provided solution is valid; otherwise false
- */
-export function verifySolution(
+function shouldDebug(options?: VerifySolutionOptions): boolean {
+  return options?.debug ?? process.env.NODE_ENV === 'development';
+}
+
+function warn(
+  reason: VerifyFailureReason,
+  message: string,
+  options?: VerifySolutionOptions,
+  error?: unknown
+): VerifySolutionResult {
+  const warning: VerifyWarning = error === undefined
+    ? { reason, message }
+    : { reason, message, error };
+  options?.onWarning?.(warning);
+  if (shouldDebug(options)) {
+    const details = error instanceof Error ? error.message : error;
+    console.warn(`[ribaunt] ${message}`, details ?? '');
+  }
+  return { valid: false, reason, message };
+}
+
+function classifyTokenError(error: unknown): VerifyFailureReason {
+  if (error && typeof error === 'object' && 'name' in error) {
+    const name = String((error as { name?: unknown }).name);
+    if (name === 'TokenExpiredError') return 'expired-token';
+  }
+  if (error instanceof Error && error.message.includes('replayStore')) return 'configuration-error';
+  return 'invalid-token';
+}
+
+function getReplayStore(options?: VerifySolutionOptions): ReplayStore | undefined {
+  const mode = options?.replayPrevention ?? 'local';
+  if (mode === 'disabled') return undefined;
+  if (mode === 'local') return defaultLocalReplayStore;
+  if (!options?.replayStore) {
+    throw new Error('A replayStore is required when replayPrevention is set to "remote"');
+  }
+  return options.replayStore;
+}
+
+function extractNonces(
+  tokens: ChallengeToken[],
+  input: number | string | Array<number | string> | ChallengeSolution | ChallengeSolution[]
+): Array<number | string> | undefined {
+  if (!Array.isArray(input) || input.length !== tokens.length) return undefined;
+  return input.map((entry) => (
+    typeof entry === 'object' && entry !== null && 'nonce' in entry ? entry.nonce : entry
+  )) as Array<number | string>;
+}
+
+function contextMatches(payload: ChallengeTokenPayload, suppliedContext: string | undefined): boolean {
+  if (payload.contextHash === undefined) return suppliedContext === undefined;
+  if (suppliedContext === undefined) return false;
+  const expected = Buffer.from(payload.contextHash, 'hex');
+  const actual = Buffer.from(hashContext(suppliedContext, payload.jti!), 'hex');
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
+
+export async function verifySolution(
   token: ChallengeToken | ChallengeToken[],
   nonce: number | string | Array<number | string> | ChallengeSolution | ChallengeSolution[],
   options?: VerifySolutionOptions
-): Promise<boolean> {
+): Promise<VerifySolutionResult> {
+  const tokens = Array.isArray(token) ? token : [token];
+  if (tokens.length === 0) {
+    return warn('invalid-solution', 'verifySolution requires at least one challenge token', options);
+  }
+  let nonces: Array<number | string>;
+
   if (Array.isArray(token)) {
-    let nonces: Array<number | string>;
-    if (Array.isArray(nonce)) {
-      if (nonce.length !== token.length) {
-        return Promise.resolve(false);
-      }
-      if (nonce.length > 0 && typeof nonce[0] === 'object' && 'nonce' in nonce[0]) {
-        nonces = (nonce as ChallengeSolution[]).map(s => s.nonce);
-      } else {
-        nonces = nonce as Array<number | string>;
-      }
-    } else {
-      return Promise.resolve(false);
+    const extracted = extractNonces(tokens, nonce);
+    if (!extracted) return warn('invalid-solution', 'verifySolution received mismatched solutions', options);
+    nonces = extracted;
+  } else if (Array.isArray(nonce)) {
+    if (nonce.length === 0) return warn('invalid-solution', 'verifySolution received an empty nonce', options);
+    const first = nonce[0];
+    if (first === undefined) {
+      return warn('invalid-solution', 'verifySolution received an empty nonce', options);
     }
-
-    return (async () => {
-      for (let index = 0; index < token.length; index++) {
-        const challengeToken = token[index];
-        const nonceEntry = nonces[index];
-
-        if (challengeToken === undefined || nonceEntry === undefined) {
-          return false;
-        }
-
-        if (!await verifySingleSolution(challengeToken, nonceEntry, options)) {
-          return false;
-        }
-      }
-
-      return true;
-    })();
-  }
-
-  let effectiveNonce: number | string;
-  if (Array.isArray(nonce)) {
-    if (nonce.length === 0) {
-      return Promise.resolve(false);
-    }
-    if (typeof nonce[0] === 'object' && 'nonce' in nonce[0]) {
-      effectiveNonce = (nonce[0] as ChallengeSolution).nonce;
-    } else {
-      effectiveNonce = nonce[0] as number | string;
-    }
-  } else if (nonce && typeof nonce === 'object' && 'nonce' in nonce) {
-    effectiveNonce = (nonce as ChallengeSolution).nonce;
+    nonces = [typeof first === 'object' && first !== null && 'nonce' in first ? first.nonce : first];
   } else {
-    effectiveNonce = nonce as number | string;
+    nonces = [typeof nonce === 'object' && nonce !== null && 'nonce' in nonce ? nonce.nonce : nonce];
   }
 
-  if (effectiveNonce === undefined) {
-    return Promise.resolve(false);
-  }
+  const validated: ChallengeTokenPayload[] = [];
+  try {
+    for (let index = 0; index < tokens.length; index++) {
+      const currentToken = tokens[index];
+      const currentNonce = nonces[index];
+      if (!currentToken || currentNonce === undefined || currentNonce === null || currentNonce === '') {
+        return warn('invalid-solution', 'verifySolution received an empty nonce', options);
+      }
 
-  return verifySingleSolution(token, effectiveNonce, options);
+      const decoded = jwt.verify(currentToken, getSecret());
+      if (!isValidPayload(decoded)) throw new Error('Invalid challenge token payload');
+      const payload = decoded;
+      if (payload.expires < Math.floor(Date.now() / 1000)) {
+        return warn('expired-token', 'verifySolution rejected an expired challenge token', options);
+      }
+      if (!contextMatches(payload, options?.context)) {
+        return warn('context-mismatch', 'verifySolution rejected a mismatched challenge context', options);
+      }
+
+      const hash = crypto
+        .createHash('sha256')
+        .update(`${payload.challenge}${String(currentNonce)}`)
+        .digest('hex');
+      if (!hash.startsWith('0'.repeat(payload.difficulty))) {
+        return warn('invalid-solution', 'verifySolution rejected an invalid nonce', options);
+      }
+      validated.push(payload);
+    }
+
+    const replayStore = getReplayStore(options);
+    const jtis = validated.flatMap((payload) => payload.jti ? [payload.jti] : []);
+    if (replayStore && jtis.length > 0) {
+      const expiresAt = Math.max(...validated.map((payload) => payload.expires));
+      let consumed: boolean;
+      if (jtis.length > 1) {
+        if (!replayStore.consumeMany) {
+          return warn(
+            'configuration-error',
+            'A replayStore with consumeMany is required for atomic batch verification',
+            options
+          );
+        }
+        consumed = await replayStore.consumeMany(jtis, expiresAt);
+      } else {
+        consumed = await replayStore.consume(jtis[0]!, expiresAt);
+      }
+      if (!consumed) return warn('replay-detected', 'verifySolution rejected a replayed token', options);
+    }
+
+    return { valid: true };
+  } catch (error) {
+    const reason = classifyTokenError(error);
+    return warn(reason, 'verifySolution rejected a token or nonce', options, error);
+  }
 }

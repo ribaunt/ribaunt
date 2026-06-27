@@ -89,17 +89,17 @@ export async function POST(req: Request) {
   const body = await req.json();
   const { tokens, solutions } = body;
   
-  const isValid = await verifySolution(tokens, solutions, {
+  const result = await verifySolution(tokens, solutions, {
     onWarning: (warning) => {
       // Optional structured warning telemetry
       console.log('captcha warning', warning.reason);
     },
   });
   
-  if (isValid) {
+  if (result.valid) {
     return NextResponse.json({ success: true });
   } else {
-    return NextResponse.json({ success: false, error: 'Invalid CAPTCHA solution' }, { status: 400 });
+    return NextResponse.json({ success: false, error: result.reason }, { status: 400 });
   }
 }
 ```
