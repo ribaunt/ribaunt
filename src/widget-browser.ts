@@ -4,6 +4,7 @@
  */
 
 export { RibauntWidget } from './widget.js';
+export { calibrateBrowser, calibrateClient } from './solver.js';
 
 // Auto-register the widget when imported
 import './widget.js';

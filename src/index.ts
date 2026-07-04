@@ -41,11 +41,18 @@ export interface Workload {
 }
 
 export interface ChallengeOptions {
-  difficulty?: number;
+  difficulty?: number | 'auto';
   amount?: number;
   ttlSeconds?: number;
   context?: string;
   workload?: Pick<Workload, 'difficulty' | 'amount'>;
+  riskScore?: number;
+  targetDurationMs?: number;
+  calibration?: ClientCalibration;
+  minDifficulty?: number;
+  maxDifficulty?: number;
+  minAmount?: number;
+  maxAmount?: number;
 }
 
 export interface ReplayStore {
@@ -221,6 +228,25 @@ export function selectWorkload(options: AdaptiveWorkloadOptions = {}): Workload 
   return closestWorkload(Math.min(targetAttempts, maximumAttempts), bounds);
 }
 
+export function calibrateNode(iterations = 128): ClientCalibration {
+  if (!Number.isFinite(iterations) || iterations < 1) {
+    throw new Error('Calibration iterations must be at least 1');
+  }
+
+  const normalizedIterations = Math.floor(iterations);
+  const startedAt = performance.now();
+  for (let index = 0; index < normalizedIterations; index++) {
+    crypto.createHash('sha256').update(`ribaunt-calibration:${index}`).digest('hex');
+  }
+
+  return {
+    iterations: normalizedIterations,
+    durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
+  };
+}
+
+export const calibrateClient = calibrateNode;
+
 function generateChallenge(length = 8): string {
   return crypto.randomBytes(length).toString('base64url').slice(0, length);
 }
@@ -277,15 +303,18 @@ export function createChallenge(
   ttlSeconds = 30
 ): ChallengeToken[] {
   const options = typeof difficultyOrOptions === 'object' ? difficultyOrOptions : undefined;
+  const selectedWorkload = options?.workload
+    ?? (options?.difficulty === 'auto' ? selectWorkload(options) : undefined);
+  const configuredDifficulty = options?.difficulty === 'auto' ? undefined : options?.difficulty;
   const difficulty = assertFiniteInteger(
-    options?.workload?.difficulty ?? options?.difficulty
+    selectedWorkload?.difficulty ?? configuredDifficulty
       ?? (typeof difficultyOrOptions === 'number' ? difficultyOrOptions : 5),
     'Challenge difficulty',
     1
   );
   if (difficulty > 64) throw new Error('Challenge difficulty must be at most 64');
   const normalizedAmount = assertFiniteInteger(
-    options?.workload?.amount ?? options?.amount ?? (options ? 1 : amount),
+    selectedWorkload?.amount ?? options?.amount ?? (options ? 1 : amount),
     'Challenge amount',
     1
   );

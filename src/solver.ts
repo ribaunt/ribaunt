@@ -75,6 +75,8 @@ export async function calibrateBrowser(iterations = 128): Promise<BrowserCalibra
   };
 }
 
+export const calibrateClient = calibrateBrowser;
+
 /**
  * Solve a single challenge token (browser-compatible)
  */
