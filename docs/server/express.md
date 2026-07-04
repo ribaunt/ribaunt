@@ -29,11 +29,22 @@ if (!process.env.RIBAUNT_SECRET) {
 }
 
 // 1. Endpoint to generate a challenge
-app.get('/api/captcha/challenge', (req, res) => {
+app.post('/api/captcha/challenge', (req, res) => {
   try {
-    // Generate 4 challenges with difficulty 5, valid for 120 seconds
-    // Validate any user- or config-controlled inputs before passing them here.
-    const challenges = createChallenge(5, 4, 120);
+    const { calibration } = req.body;
+
+    // Auto hardness is raise-only: calibration can increase work, but
+    // cannot lower this server-owned baseline.
+    const challenges = createChallenge({
+      difficulty: 'auto',
+      calibration,
+      targetDurationMs: 750,
+      minDifficulty: 3,
+      maxDifficulty: 6,
+      minAmount: 1,
+      maxAmount: 8,
+      ttlSeconds: 120,
+    });
     res.json({ challenges });
   } catch (error) {
     res.status(500).json({ error: 'Failed to generate challenge' });
@@ -89,8 +100,9 @@ app.listen(port, () => {
 
 ## 3. Best Practices
 - **Challenge Response Contract:** Return `{ challenges: string[] }` from your challenge endpoint. `{ tokens: string[] }` and raw `string[]` are still accepted by the widget for compatibility.
+- **Auto Hardness:** Use a POST challenge endpoint with widget `challenge-method="POST"` and `calibrate="true"` so the server receives `{ calibration }`.
 - **Rate Limiting:** Implement IP-based rate limiting on the `/api/captcha/challenge` endpoint using tools like `express-rate-limit` to prevent abuse.
 - **Session Linking:** Instead of simply returning `{ success: true }`, you can return a signed JWT (or set an HTTP-only cookie) that the client must include on subsequent form submissions. This guarantees the form is submitted by a user who recently solved a CAPTCHA.
-- **Input Validation:** Current versions reject invalid `difficulty`, `amount`, and `ttlSeconds` values. Validate untrusted inputs before calling `createChallenge()`.
+- **Input Validation:** Current versions reject invalid `difficulty`, `amount`, `ttlSeconds`, and calibration values. Treat calibration as untrusted; it can raise workload but must not lower your server-owned baseline.
 - **Replay Mode Selection:** The default process-local replay protection is suitable for single-process deployments. In serverless or multi-instance deployments, use `remote` with an atomic distributed store adapter. Use `disabled` only as a legacy opt-out when another layer prevents replay.
 - **Verification Observability:** Use the optional `onWarning` callback with `verifySolution()` to capture structured warning reasons (for example `invalid-token`, `replay-detected`) without forcing production console logs.

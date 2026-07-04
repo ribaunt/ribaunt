@@ -58,7 +58,7 @@ export default function MyPage() {
 }
 ```
 
-The wrapper also syncs `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `showWarning`, `warningMessage`, `solveTimeout`, and `disabled` after mount, so you generally do not need to force remounts when those props change.
+The wrapper also syncs `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `challengeMethod`, `calibrate`, `showWarning`, `warningMessage`, `solveTimeout`, and `disabled` after mount, so you generally do not need to force remounts when those props change.
 
 ## Step 2: Setting up Next.js Route Handlers (API Routes)
 

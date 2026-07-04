@@ -24,11 +24,22 @@ import 'dotenv/config';
 import { NextResponse } from 'next/server';
 import { createChallenge } from 'ribaunt';
 
-export async function GET() {
+export async function POST(req: Request) {
   try {
-    // Generate 4 challenges with difficulty 5, valid for 60 seconds
-    // Validate any dynamic values before passing them to createChallenge().
-    const challenges = createChallenge(5, 4, 60);
+    const { calibration } = await req.json();
+
+    // Auto hardness is raise-only: calibration can increase work, but
+    // cannot lower this server-owned baseline.
+    const challenges = createChallenge({
+      difficulty: 'auto',
+      calibration,
+      targetDurationMs: 750,
+      minDifficulty: 3,
+      maxDifficulty: 6,
+      minAmount: 1,
+      maxAmount: 8,
+      ttlSeconds: 60,
+    });
     return NextResponse.json({ challenges });
   } catch (error) {
     return NextResponse.json(
@@ -96,12 +107,22 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { createChallenge } from 'ribaunt';
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'GET') {
+  if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
   try {
-    const challenges = createChallenge(5, 4, 60);
+    const { calibration } = req.body;
+    const challenges = createChallenge({
+      difficulty: 'auto',
+      calibration,
+      targetDurationMs: 750,
+      minDifficulty: 3,
+      maxDifficulty: 6,
+      minAmount: 1,
+      maxAmount: 8,
+      ttlSeconds: 60,
+    });
     res.status(200).json({ challenges });
   } catch (error) {
     res.status(500).json({ error: 'Failed to generate challenge' });

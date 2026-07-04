@@ -110,7 +110,7 @@ export default function MyForm() {
 }
 ```
 
-The React wrapper now syncs `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `showWarning`, `warningMessage`, `solveTimeout`, and `disabled` after mount. You no longer need to force a remount just to update those props.
+The React wrapper now syncs `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `challengeMethod`, `calibrate`, `showWarning`, `warningMessage`, `solveTimeout`, and `disabled` after mount. You no longer need to force a remount just to update those props.
 
 ### Using Plain HTML
 Include the widget in your HTML file directly:

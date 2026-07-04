@@ -71,6 +71,8 @@ The React wrapper now updates these props live after mount:
 - `challengeEndpoint`
 - `verifyEndpoint`
 - `autoVerify`
+- `challengeMethod`
+- `calibrate`
 - `showWarning`
 - `warningMessage`
 - `solveTimeout`

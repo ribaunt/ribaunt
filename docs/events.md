@@ -84,4 +84,4 @@ If you use the React wrapper (`ribaunt/widget-react`), you get built-in strongly
 
 - **`onEvent`**: Fires for all events with the event type (`'verify'`, `'error'`, `'state-change'`, or `'ready'`) and its detail. This is a catch-all handler that can be used instead of individual callbacks.
 
-The React wrapper also syncs key widget props after mount, including `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `showWarning`, `warningMessage`, `solveTimeout`, and `disabled`.
+The React wrapper also syncs key widget props after mount, including `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `challengeMethod`, `calibrate`, `showWarning`, `warningMessage`, `solveTimeout`, and `disabled`.

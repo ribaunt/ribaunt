@@ -143,6 +143,31 @@ const challenges = createChallenge(5, 4, 120);
 
 Validate user- or config-controlled values before passing them to `createChallenge()`. Invalid values throw.
 
+### `createChallenge({ difficulty: "auto", ... })`
+
+Creates adaptive challenge tokens from a server-bounded calibration hint. Calibration is untrusted and raise-only: it can increase work for fast clients, but it never lowers the server baseline.
+
+```ts
+const challenges = createChallenge({
+  difficulty: 'auto',
+  calibration: requestBody.calibration,
+  targetDurationMs: 750,
+  minDifficulty: 3,
+  maxDifficulty: 6,
+  minAmount: 1,
+  maxAmount: 8,
+  ttlSeconds: 60,
+});
+```
+
+For machine-to-machine checks, benchmark the Node client and send the same calibration shape:
+
+```ts
+import { calibrateNode } from 'ribaunt';
+
+const calibration = calibrateNode();
+```
+
 ### `verifySolution(tokens, solutions, options?)`
 
 Verifies submitted solutions and returns a structured result:
@@ -188,6 +213,8 @@ const solutions = solveChallenge(challenges, {
   challenge-endpoint="/api/captcha/challenge"
   verify-endpoint="/api/captcha/verify"
   auto-verify="true"
+  challenge-method="POST"
+  calibrate="true"
   show-warning="false"
   warning-message="Verification may take longer on this device."
   solve-timeout="15000"
@@ -200,6 +227,8 @@ const solutions = solveChallenge(challenges, {
 | `challenge-endpoint` | `challengeEndpoint` | Endpoint that returns `{ challenges: string[] }`. |
 | `verify-endpoint` | `verifyEndpoint` | Endpoint that accepts `{ tokens, solutions }`. |
 | `auto-verify` | `autoVerify` | Starts verification when the widget loads. |
+| `challenge-method` | `challengeMethod` | Use `POST` when sending calibration to an auto-hardness endpoint. |
+| `calibrate` | `calibrate` | Benchmarks the browser and sends `{ calibration }` with POST challenge requests. |
 | `show-warning` | `showWarning` | Shows a warning banner. |
 | `warning-message` | `warningMessage` | Custom warning text. |
 | `solve-timeout` | `solveTimeout` | Optional solve timeout in milliseconds. |

@@ -11,6 +11,7 @@ import { createChallenge } from 'ribaunt';
 
 // Signature
 // createChallenge(difficulty: number, amount: number, ttlSeconds: number): string[]
+// createChallenge(options: ChallengeOptions): string[]
 ```
 
 | Parameter | Type | Default | Description |
@@ -34,6 +35,33 @@ import { createChallenge } from 'ribaunt';
 - **High / Sensitive Actions:** `createChallenge(5, 8, 120)` - takes ~2 seconds
 
 > **Warning:** Do not let users control `difficulty`, `amount`, or `ttlSeconds` without validation.
+
+### Auto Hardness
+
+Use `difficulty: "auto"` to adapt challenge work from a client benchmark while keeping the server in control.
+
+```typescript
+const challenges = createChallenge({
+  difficulty: 'auto',
+  calibration: body.calibration,
+  targetDurationMs: 750,
+  minDifficulty: 3,
+  maxDifficulty: 6,
+  minAmount: 1,
+  maxAmount: 8,
+  ttlSeconds: 60,
+});
+```
+
+Calibration is self-reported and must be treated as untrusted. Ribaunt uses it as a raise-only hint: a fast calibration can increase work up to your maximums, but a slow or fake calibration cannot lower the server-owned baseline.
+
+For Node or machine-to-machine clients:
+
+```typescript
+import { calibrateNode } from 'ribaunt';
+
+const calibration = calibrateNode();
+```
 
 ## Server-Side: `verifySolution` (async)
 
@@ -124,6 +152,8 @@ Plain LAN URLs such as `http://192.168.x.x` may not expose `crypto.subtle`, espe
 | `challenge-endpoint` | `challengeEndpoint` | `string` | `undefined` | URL endpoint that returns the JWT tokens. If undefined, the widget cannot auto-fetch. |
 | `verify-endpoint` | `verifyEndpoint` | `string` | `undefined` | URL endpoint to POST the solutions. If undefined, you must handle verification manually using the solver directly. |
 | `auto-verify` | `autoVerify` | `boolean\|string` | `false` | Starts verification automatically once the widget loads. Set to `"false"` or omit it to require user interaction or `startVerification()`. |
+| `challenge-method` | `challengeMethod` | `'GET'\|'POST'` | `'GET'` | Use `POST` when your challenge endpoint accepts calibration for `difficulty: "auto"`. |
+| `calibrate` | `calibrate` | `boolean\|string` | `false` | Sends `{ calibration }` with POST challenge requests. |
 | `show-warning` | `showWarning` | `boolean\|string` | `false` | Shows a red warning banner above the widget. Often used to alert users if WebAssembly is missing for future fast-solvers. |
 | `warning-message` | `warningMessage` | `string` | `"Enable WASM..."` | Custom message text for the warning banner. |
 | `solve-timeout` | `solveTimeout` | `number\|string` | `undefined` | Optional timeout in milliseconds for solving. If omitted, solving is not automatically timed out. |
@@ -156,6 +186,8 @@ When `disabled` is present and not equal to `"false"`:
 <ribaunt-widget
   challenge-endpoint="https://api.myapp.com/challenge"
   verify-endpoint="https://api.myapp.com/verify"
+  challenge-method="POST"
+  calibrate="true"
   auto-verify="true"
   show-warning="true"
   warning-message="WASM is disabled; this may take 3x longer!"
