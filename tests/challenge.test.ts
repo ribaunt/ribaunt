@@ -3,6 +3,7 @@ import {
     solveChallenge,
     verifySolution,
     selectWorkload,
+    calibrateNode,
     LocalReplayStore,
 } from '../src/index';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -135,6 +136,65 @@ describe('test challenge flow', () => {
         expect(() => selectWorkload({
             calibration: { iterations: 0, durationMs: 1 },
         })).toThrow('Calibration iterations must be at least 1');
+    });
+
+    it('uses raise-only adaptive workload for auto difficulty challenges', () => {
+        const baseline = createChallenge({
+            difficulty: 'auto',
+            riskScore: 0,
+            minDifficulty: 3,
+            maxDifficulty: 6,
+            minAmount: 1,
+            maxAmount: 8,
+        });
+        const slowClaim = createChallenge({
+            difficulty: 'auto',
+            riskScore: 0,
+            calibration: { iterations: 1, durationMs: 1_000_000 },
+            minDifficulty: 3,
+            maxDifficulty: 6,
+            minAmount: 1,
+            maxAmount: 8,
+        });
+        const fastClaim = createChallenge({
+            difficulty: 'auto',
+            riskScore: 0,
+            calibration: { iterations: 1_000_000, durationMs: 1 },
+            minDifficulty: 3,
+            maxDifficulty: 6,
+            minAmount: 1,
+            maxAmount: 8,
+        });
+
+        const baselinePayload = jwt.decode(baseline[0]!) as Record<string, unknown>;
+        const slowPayload = jwt.decode(slowClaim[0]!) as Record<string, unknown>;
+        const fastPayload = jwt.decode(fastClaim[0]!) as Record<string, unknown>;
+
+        expect(baseline).toHaveLength(1);
+        expect(slowClaim).toHaveLength(1);
+        expect(baselinePayload.difficulty).toBe(3);
+        expect(slowPayload.difficulty).toBe(3);
+        expect(fastClaim).toHaveLength(8);
+        expect(fastPayload.difficulty).toBe(6);
+    });
+
+    it('lets explicit workload override auto difficulty selection', () => {
+        const tokens = createChallenge({
+            difficulty: 'auto',
+            calibration: { iterations: 1_000_000, durationMs: 1 },
+            workload: { difficulty: 2, amount: 2 },
+        });
+        const payload = jwt.decode(tokens[0]!) as Record<string, unknown>;
+
+        expect(tokens).toHaveLength(2);
+        expect(payload.difficulty).toBe(2);
+    });
+
+    it('calibrates Node clients for M2M challenge requests', () => {
+        const calibration = calibrateNode(2);
+
+        expect(calibration.iterations).toBe(2);
+        expect(calibration.durationMs).toBeGreaterThanOrEqual(1);
     });
 
     it('uses an explicit workload when creating an options challenge', () => {

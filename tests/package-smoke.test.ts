@@ -34,7 +34,9 @@ describe('package smoke tests', () => {
           console.log(JSON.stringify({
             createChallenge: typeof mod.createChallenge,
             verifySolution: typeof mod.verifySolution,
-            selectWorkload: typeof mod.selectWorkload
+            selectWorkload: typeof mod.selectWorkload,
+            calibrateNode: typeof mod.calibrateNode,
+            calibrateClient: typeof mod.calibrateClient
           }));
         `,
       ],
@@ -50,7 +52,9 @@ describe('package smoke tests', () => {
           console.log(JSON.stringify({
             createChallenge: typeof mod.createChallenge,
             verifySolution: typeof mod.verifySolution,
-            selectWorkload: typeof mod.selectWorkload
+            selectWorkload: typeof mod.selectWorkload,
+            calibrateNode: typeof mod.calibrateNode,
+            calibrateClient: typeof mod.calibrateClient
           }));
         `,
       ],
@@ -61,11 +65,15 @@ describe('package smoke tests', () => {
       createChallenge: 'function',
       verifySolution: 'function',
       selectWorkload: 'function',
+      calibrateNode: 'function',
+      calibrateClient: 'function',
     });
     expect(JSON.parse(cjsOutput)).toEqual({
       createChallenge: 'function',
       verifySolution: 'function',
       selectWorkload: 'function',
+      calibrateNode: 'function',
+      calibrateClient: 'function',
     });
   });
 
@@ -93,6 +101,8 @@ describe('package smoke tests', () => {
 
           console.log(JSON.stringify({
             widget: typeof widgetModule.RibauntWidget,
+            calibrateBrowser: typeof widgetModule.calibrateBrowser,
+            calibrateClient: typeof widgetModule.calibrateClient,
             widgetRegistered: Boolean(customElements.get('ribaunt-widget')),
             widgetReact: typeof widgetReactModule.default
           }));
@@ -103,6 +113,8 @@ describe('package smoke tests', () => {
 
     expect(JSON.parse(browserOutput)).toEqual({
       widget: 'function',
+      calibrateBrowser: 'function',
+      calibrateClient: 'function',
       widgetRegistered: true,
       widgetReact: 'object',
     });

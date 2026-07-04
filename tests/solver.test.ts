@@ -2,7 +2,7 @@
 
 import { vi } from 'vitest';
 import { createChallenge } from '../src/index';
-import { solveChallenge, solveSingleChallenge } from '../src/solver';
+import { calibrateBrowser, calibrateClient, solveChallenge, solveSingleChallenge } from '../src/solver';
 
 describe('browser solver', () => {
   beforeAll(() => {
@@ -28,6 +28,16 @@ describe('browser solver', () => {
     expect(solution).toBeTruthy();
     expect(solution?.nonce).toBeDefined();
     expect(solution?.hash.startsWith('0')).toBe(true);
+  });
+
+  it('calibrates browser clients with the shared calibration shape', async () => {
+    const calibration = await calibrateBrowser(2);
+    const clientCalibration = await calibrateClient(2);
+
+    expect(calibration.iterations).toBe(2);
+    expect(calibration.durationMs).toBeGreaterThanOrEqual(1);
+    expect(clientCalibration.iterations).toBe(2);
+    expect(clientCalibration.durationMs).toBeGreaterThanOrEqual(1);
   });
 
   it('returns undefined for malformed tokens', async () => {
