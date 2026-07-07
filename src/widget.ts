@@ -319,6 +319,7 @@ export class RibauntWidget extends HTMLElement {
   private logoElement: HTMLAnchorElement | null = null;
   private autoVerifyStarted = false;
   private attemptController: AbortController | null = null;
+  private progressAnimFrame: number | null = null;
 
   static get observedAttributes() {
     return [
@@ -351,6 +352,10 @@ export class RibauntWidget extends HTMLElement {
 
   disconnectedCallback() {
     this.cancelAttempt();
+    if (this.progressAnimFrame !== null) {
+      cancelAnimationFrame(this.progressAnimFrame);
+      this.progressAnimFrame = null;
+    }
     this.removeEventListeners();
   }
 
@@ -364,6 +369,10 @@ export class RibauntWidget extends HTMLElement {
   }
 
   private render() {
+    if (this.progressAnimFrame !== null) {
+      cancelAnimationFrame(this.progressAnimFrame);
+      this.progressAnimFrame = null;
+    }
     this.removeEventListeners();
 
     const showWarning = this.hasAttribute('show-warning') && this.getAttribute('show-warning') !== 'false';
@@ -545,15 +554,57 @@ export class RibauntWidget extends HTMLElement {
   }
 
   private setProgress(value: number) {
-    // Smooth the progress value for better animation
-    const smoothedProgress = Math.round(value * 10) / 10;
-    this.progress = smoothedProgress;
-    if (this.messageElement) {
-      this.messageElement.textContent = this.getMessage();
+    const target = Math.round(value * 10) / 10;
+
+    if (this.progressAnimFrame !== null) {
+      cancelAnimationFrame(this.progressAnimFrame);
     }
-    if (this.captchaElement) {
-      this.captchaElement.style.setProperty('--progress', `${smoothedProgress}%`);
+
+    const start = this.progress;
+    this.progress = target;
+
+    if (this.state !== 'solving') {
+      if (this.captchaElement) {
+        this.captchaElement.style.setProperty('--progress', `${target}%`);
+      }
+      if (this.messageElement) {
+        this.messageElement.textContent = this.getMessage();
+      }
+      return;
     }
+
+    const startTime = performance.now();
+    const duration = 120;
+
+    const animate = (now: number) => {
+      const elapsed = now - startTime;
+      const t = Math.min(elapsed / duration, 1);
+      const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+      const current = Math.round((start + (target - start) * eased) * 10) / 10;
+
+      this.progress = current;
+      if (this.captchaElement) {
+        this.captchaElement.style.setProperty('--progress', `${current}%`);
+      }
+      if (this.messageElement) {
+        this.messageElement.textContent = this.getMessage();
+      }
+
+      if (t < 1) {
+        this.progressAnimFrame = requestAnimationFrame(animate);
+      } else {
+        this.progressAnimFrame = null;
+        this.progress = target;
+        if (this.captchaElement) {
+          this.captchaElement.style.setProperty('--progress', `${target}%`);
+        }
+        if (this.messageElement) {
+          this.messageElement.textContent = this.getMessage();
+        }
+      }
+    };
+
+    this.progressAnimFrame = requestAnimationFrame(animate);
   }
 
   private cancelAttempt() {
