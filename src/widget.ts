@@ -94,7 +94,7 @@ const WIDGET_STYLES = `
     border: var(--ribaunt-checkbox-border, 1px solid #aaaaaad1);
     border-radius: var(--ribaunt-checkbox-border-radius, 6px);
     background-color: var(--ribaunt-checkbox-background, #fafafa91);
-    transition: opacity .2s;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     margin-top: var(--ribaunt-checkbox-margin, 2px);
     margin-bottom: var(--ribaunt-checkbox-margin, 2px);
     flex-shrink: 0;
@@ -103,6 +103,18 @@ const WIDGET_STYLES = `
   /* Font Family */
   .captcha * {
     font-family: var(--ribaunt-font, system, -apple-system, "BlinkMacSystemFont", ".SFNSText-Regular", "San Francisco", "Roboto", "Segoe UI", "Helvetica Neue", "Lucida Grande", "Ubuntu", "arial", sans-serif);
+  }
+
+  /* Keyframes */
+  @keyframes ribaunt-spin {
+    from { transform: scale(1.1) rotate(0deg); }
+    to { transform: scale(1.1) rotate(360deg); }
+  }
+
+  @keyframes ribaunt-pop {
+    0% { transform: scale(1); }
+    60% { transform: scale(1.12); }
+    100% { transform: scale(1); }
   }
 
   /* Label Text */
@@ -118,11 +130,9 @@ const WIDGET_STYLES = `
   .captcha[data-state=fetching] .checkbox,
   .captcha[data-state=solving] .checkbox,
   .captcha[data-state=verifying] .checkbox {
-    background: none;
     display: flex;
     align-items: center;
     justify-content: center;
-    transform: scale(1.1);
     border: none;
     border-radius: 50%;
     background: conic-gradient(
@@ -132,7 +142,7 @@ const WIDGET_STYLES = `
       var(--ribaunt-spinner-background-color, #eee) 100%
     );
     position: relative;
-    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .captcha[data-state=fetching] .checkbox::after,
@@ -144,7 +154,7 @@ const WIDGET_STYLES = `
     height: calc(100% - var(--ribaunt-spinner-thickness, 5px));
     border-radius: 50%;
     margin: calc(var(--ribaunt-spinner-thickness, 5px) / 2);
-    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   /* Done/Success State */
@@ -152,6 +162,9 @@ const WIDGET_STYLES = `
     border: 1px solid transparent;
     background-image: var(--ribaunt-checkmark, url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cstyle%3E%40keyframes%20anim%7B0%25%7Bstroke-dashoffset%3A23.21320343017578px%7Dto%7Bstroke-dashoffset%3A0%7D%7D%3C%2Fstyle%3E%3Cpath%20fill%3D%22none%22%20stroke%3D%22%2300a67d%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%222%22%20d%3D%22m5%2012%205%205L20%207%22%20style%3D%22stroke-dashoffset%3A0%3Bstroke-dasharray%3A23.21320343017578px%3Banimation%3Aanim%20.5s%20ease%22%2F%3E%3C%2Fsvg%3E"));
     background-size: cover;
+    animation: ribaunt-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+    box-shadow: 0 0 0 3px rgba(0, 166, 125, 0.25);
+    transition: box-shadow 0.5s ease-out;
   }
 
   /* Error State */
@@ -194,6 +207,23 @@ const WIDGET_STYLES = `
 
     .logo {
       color: var(--ribaunt-logo-color, #999);
+    }
+
+    .captcha[data-state=fetching] .checkbox::after,
+    .captcha[data-state=solving] .checkbox::after,
+    .captcha[data-state=verifying] .checkbox::after {
+      background-color: var(--ribaunt-background, #171717);
+    }
+
+    .captcha[data-state=fetching] .checkbox,
+    .captcha[data-state=solving] .checkbox,
+    .captcha[data-state=verifying] .checkbox {
+      background: conic-gradient(
+        var(--ribaunt-spinner-color, #eee) 0%, 
+        var(--ribaunt-spinner-color, #eee) var(--progress, 0%), 
+        var(--ribaunt-spinner-background-color, #333) var(--progress, 0%), 
+        var(--ribaunt-spinner-background-color, #333) 100%
+      );
     }
   }
 
@@ -319,6 +349,7 @@ export class RibauntWidget extends HTMLElement {
   private logoElement: HTMLAnchorElement | null = null;
   private autoVerifyStarted = false;
   private attemptController: AbortController | null = null;
+  private progressAnimFrame: number | null = null;
 
   static get observedAttributes() {
     return [
@@ -351,6 +382,10 @@ export class RibauntWidget extends HTMLElement {
 
   disconnectedCallback() {
     this.cancelAttempt();
+    if (this.progressAnimFrame !== null) {
+      cancelAnimationFrame(this.progressAnimFrame);
+      this.progressAnimFrame = null;
+    }
     this.removeEventListeners();
   }
 
@@ -364,6 +399,10 @@ export class RibauntWidget extends HTMLElement {
   }
 
   private render() {
+    if (this.progressAnimFrame !== null) {
+      cancelAnimationFrame(this.progressAnimFrame);
+      this.progressAnimFrame = null;
+    }
     this.removeEventListeners();
 
     const showWarning = this.hasAttribute('show-warning') && this.getAttribute('show-warning') !== 'false';
@@ -447,7 +486,7 @@ export class RibauntWidget extends HTMLElement {
       case 'initial':
         return "I'm a human";
       case 'fetching':
-        return 'Preparing challenge...';
+        return '';
       case 'solving':
         return `Solving... ${this.progress}%`;
       case 'verifying':
@@ -455,7 +494,7 @@ export class RibauntWidget extends HTMLElement {
       case 'done':
         return "You're a human";
       case 'error':
-        return this.timeoutError ? 'Timed out. Try again.' : 'Error. Try again.';
+        return this.timeoutError ? 'Timed out.' : 'Error. Try again.';
     }
   }
 
@@ -545,15 +584,57 @@ export class RibauntWidget extends HTMLElement {
   }
 
   private setProgress(value: number) {
-    // Smooth the progress value for better animation
-    const smoothedProgress = Math.round(value * 10) / 10;
-    this.progress = smoothedProgress;
-    if (this.messageElement) {
-      this.messageElement.textContent = this.getMessage();
+    const target = Math.round(value * 10) / 10;
+
+    if (this.progressAnimFrame !== null) {
+      cancelAnimationFrame(this.progressAnimFrame);
     }
-    if (this.captchaElement) {
-      this.captchaElement.style.setProperty('--progress', `${smoothedProgress}%`);
+
+    const start = this.progress;
+    this.progress = target;
+
+    if (this.state !== 'solving') {
+      if (this.captchaElement) {
+        this.captchaElement.style.setProperty('--progress', `${target}%`);
+      }
+      if (this.messageElement) {
+        this.messageElement.textContent = this.getMessage();
+      }
+      return;
     }
+
+    const startTime = performance.now();
+    const duration = 120;
+
+    const animate = (now: number) => {
+      const elapsed = now - startTime;
+      const t = Math.min(elapsed / duration, 1);
+      const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+      const current = Math.round((start + (target - start) * eased) * 10) / 10;
+
+      this.progress = current;
+      if (this.captchaElement) {
+        this.captchaElement.style.setProperty('--progress', `${current}%`);
+      }
+      if (this.messageElement) {
+        this.messageElement.textContent = this.getMessage();
+      }
+
+      if (t < 1) {
+        this.progressAnimFrame = requestAnimationFrame(animate);
+      } else {
+        this.progressAnimFrame = null;
+        this.progress = target;
+        if (this.captchaElement) {
+          this.captchaElement.style.setProperty('--progress', `${target}%`);
+        }
+        if (this.messageElement) {
+          this.messageElement.textContent = this.getMessage();
+        }
+      }
+    };
+
+    this.progressAnimFrame = requestAnimationFrame(animate);
   }
 
   private cancelAttempt() {
@@ -665,7 +746,7 @@ export class RibauntWidget extends HTMLElement {
         new CustomEvent('error', {
           detail: {
             error: this.timeoutError
-              ? 'Timed out. Try again.'
+              ? 'Timed out.'
               : (error instanceof Error ? error.message : String(error)),
             code,
             timeout: this.timeoutError,
