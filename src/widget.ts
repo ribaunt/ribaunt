@@ -105,6 +105,18 @@ const WIDGET_STYLES = `
     font-family: var(--ribaunt-font, system, -apple-system, "BlinkMacSystemFont", ".SFNSText-Regular", "San Francisco", "Roboto", "Segoe UI", "Helvetica Neue", "Lucida Grande", "Ubuntu", "arial", sans-serif);
   }
 
+  /* Keyframes */
+  @keyframes ribaunt-spin {
+    from { transform: scale(1.1) rotate(0deg); }
+    to { transform: scale(1.1) rotate(360deg); }
+  }
+
+  @keyframes ribaunt-pop {
+    0% { transform: scale(1); }
+    60% { transform: scale(1.12); }
+    100% { transform: scale(1); }
+  }
+
   /* Label Text */
   .captcha p {
     margin: 0;
@@ -118,11 +130,9 @@ const WIDGET_STYLES = `
   .captcha[data-state=fetching] .checkbox,
   .captcha[data-state=solving] .checkbox,
   .captcha[data-state=verifying] .checkbox {
-    background: none;
     display: flex;
     align-items: center;
     justify-content: center;
-    transform: scale(1.1);
     border: none;
     border-radius: 50%;
     background: conic-gradient(
@@ -132,6 +142,7 @@ const WIDGET_STYLES = `
       var(--ribaunt-spinner-background-color, #eee) 100%
     );
     position: relative;
+    animation: ribaunt-spin 2.5s linear infinite;
     transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
@@ -152,6 +163,9 @@ const WIDGET_STYLES = `
     border: 1px solid transparent;
     background-image: var(--ribaunt-checkmark, url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cstyle%3E%40keyframes%20anim%7B0%25%7Bstroke-dashoffset%3A23.21320343017578px%7Dto%7Bstroke-dashoffset%3A0%7D%7D%3C%2Fstyle%3E%3Cpath%20fill%3D%22none%22%20stroke%3D%22%2300a67d%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%20stroke-width%3D%222%22%20d%3D%22m5%2012%205%205L20%207%22%20style%3D%22stroke-dashoffset%3A0%3Bstroke-dasharray%3A23.21320343017578px%3Banimation%3Aanim%20.5s%20ease%22%2F%3E%3C%2Fsvg%3E"));
     background-size: cover;
+    animation: ribaunt-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+    box-shadow: 0 0 0 3px rgba(0, 166, 125, 0.25);
+    transition: box-shadow 0.5s ease-out;
   }
 
   /* Error State */
