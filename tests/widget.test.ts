@@ -560,7 +560,7 @@ describe('RibauntWidget', () => {
     expect(errorHandler).toHaveBeenCalledTimes(1);
     const event = errorHandler.mock.calls[0]?.[0] as CustomEvent<{ error: string; timeout?: boolean }>;
     expect(event.detail.timeout).toBe(true);
-    expect(event.detail.error).toBe('Timed out. Try again.');
+    expect(event.detail.error).toBe('Timed out.');
   });
 
   it('animates warning by applying visible class after render', async () => {
