@@ -21,6 +21,7 @@ export interface RibauntWidgetProps extends Omit<React.HTMLAttributes<RibauntWid
   challengeMethod?: 'GET' | 'POST';
   calibrate?: boolean | string;
   disabled?: boolean | string;
+  fallback?: React.ReactNode;
   onVerify?: (detail: WidgetVerifyDetail) => void;
   onError?: (detail: WidgetErrorDetail) => void;
   onStateChange?: (detail: WidgetStateDetail) => void;
@@ -103,6 +104,7 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       calibrate,
       disabled,
       autoVerify,
+      fallback,
       onVerify,
       onError,
       onStateChange,
@@ -269,7 +271,26 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       disabled,
     ]);
 
-    return isLoading ? null : <div ref={containerRef} />;
+    return isLoading ? (fallback ?? (
+      <>
+        <style>{`
+          @keyframes ribaunt-react-shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+          }
+        `}</style>
+        <div
+          style={{
+            height: 'var(--ribaunt-widget-height, 58px)',
+            width: 'var(--ribaunt-widget-width, 230px)',
+            borderRadius: 'var(--ribaunt-border-radius, 14px)',
+            background: 'linear-gradient(90deg, #f0f0f0 25%, #e2e2e2 50%, #f0f0f0 75%)',
+            backgroundSize: '200% 100%',
+            animation: 'ribaunt-react-shimmer 1.5s ease-in-out infinite',
+          }}
+        />
+      </>
+    )) : <div ref={containerRef} />;
   }
 );
 
