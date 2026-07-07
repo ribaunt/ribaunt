@@ -168,6 +168,37 @@ import { calibrateNode } from 'ribaunt';
 const calibration = calibrateNode();
 ```
 
+Browser calibration is also available from the widget entry point:
+
+```ts
+import { calibrateBrowser } from 'ribaunt/widget';
+
+const calibration = await calibrateBrowser();
+```
+
+Both environments expose `calibrateClient` as a cross-environment alias:
+
+```ts
+import { calibrateClient } from 'ribaunt';       // Node
+import { calibrateClient } from 'ribaunt/widget'; // browser
+```
+
+### `selectWorkload(options)`
+
+The adaptive workload engine used internally by `createChallenge()` with `difficulty: "auto"` is also directly exported:
+
+```ts
+import { selectWorkload } from 'ribaunt';
+
+const workload = selectWorkload({
+  calibration: { iterations: 128, durationMs: 50 },
+  targetDurationMs: 750,
+  minDifficulty: 3,
+  maxDifficulty: 6,
+});
+// { difficulty: 5, amount: 4, estimatedAttempts: 1256 }
+```
+
 ### `verifySolution(tokens, solutions, options?)`
 
 Verifies submitted solutions and returns a structured result:
@@ -233,6 +264,7 @@ const solutions = solveChallenge(challenges, {
 | `warning-message` | `warningMessage` | Custom warning text. |
 | `solve-timeout` | `solveTimeout` | Optional solve timeout in milliseconds. |
 | `disabled` | `disabled` | Blocks user interaction and automatic verification. |
+| | `fallback` | React-only. Custom loading element while widget dynamic import loads. Defaults to a built-in shimmer skeleton. |
 
 The recommended challenge response shape is:
 

@@ -60,6 +60,17 @@ export default function MyPage() {
 
 The wrapper also syncs `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `challengeMethod`, `calibrate`, `showWarning`, `warningMessage`, `solveTimeout`, and `disabled` after mount, so you generally do not need to force remounts when those props change.
 
+### Loading Fallback
+
+During SSR or while the widget's dynamic import loads, the React wrapper renders a built-in shimmer skeleton matching the widget dimensions. Pass a custom `fallback` prop to override it:
+
+```tsx
+<RibauntWidget
+  challengeEndpoint="/api/captcha/challenge"
+  fallback={<div style={{ height: 58, width: 230 }}>Loading…</div>}
+/>
+```
+
 ## Step 2: Setting up Next.js Route Handlers (API Routes)
 
 Create the necessary API endpoints in the `app/api/` directory (or `pages/api/` if using Pages Router).

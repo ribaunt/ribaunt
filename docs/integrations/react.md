@@ -80,6 +80,17 @@ The React wrapper now updates these props live after mount:
 
 If your older integration used a changing `key` to force a remount when one of those values changed, that workaround can usually be removed.
 
+### Loading Fallback
+
+During SSR or while the widget's dynamic import loads, the React wrapper renders a built-in shimmer skeleton matching the widget dimensions. Pass a custom `fallback` prop to override it:
+
+```tsx
+<RibauntWidget
+  challengeEndpoint="/api/captcha/challenge"
+  fallback={<div style={{ height: 58, width: 230 }}>Loading…</div>}
+/>
+```
+
 ### Disabled State
 
 When `disabled` is set, the wrapped widget blocks user interaction, `startVerification()`, and `autoVerify`. Remove or clear `disabled` before expecting the widget to run.

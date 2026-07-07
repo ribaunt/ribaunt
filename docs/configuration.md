@@ -55,13 +55,54 @@ const challenges = createChallenge({
 
 Calibration is self-reported and must be treated as untrusted. Ribaunt uses it as a raise-only hint: a fast calibration can increase work up to your maximums, but a slow or fake calibration cannot lower the server-owned baseline.
 
-For Node or machine-to-machine clients:
+Calibration is available in both server and browser environments:
 
 ```typescript
-import { calibrateNode } from 'ribaunt';
-
-const calibration = calibrateNode();
+import { calibrateNode } from 'ribaunt';       // Node.js server-side
+import { calibrateBrowser } from 'ribaunt/widget';  // Browser (Web Crypto)
 ```
+
+Both exports also expose `calibrateClient` as a cross-environment alias for convenience. Bundlers resolve the correct implementation automatically via the package export map.
+
+```typescript
+import { calibrateClient } from 'ribaunt';     // Node.js
+import { calibrateClient } from 'ribaunt/widget'; // browser (when bundling for the client)
+```
+
+### Auto Hardness Options
+
+When using `difficulty: "auto"`, the following `ChallengeOptions` fields are available:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `targetDurationMs` | `number` | `750` | Desired solve time in milliseconds. |
+| `riskScore` | `number` | `50` | Server-side risk appetite (0–100). Higher values prefer more work within bounds, independent of calibration. |
+| `calibration` | `ClientCalibration` | `undefined` | Untrusted client benchmark. Raise-only: can increase work above the server baseline, never below. |
+| `minDifficulty` | `number` | `3` | Minimum difficulty floor. |
+| `maxDifficulty` | `number` | `6` | Maximum difficulty ceiling. |
+| `minAmount` | `number` | `1` | Minimum challenge amount. |
+| `maxAmount` | `number` | `8` | Maximum challenge amount. |
+
+### `selectWorkload(options)`
+
+The adaptive engine is also exposed directly for advanced use cases, such as pre-computing workload before calling `createChallenge()`:
+
+```typescript
+import { selectWorkload } from 'ribaunt';
+
+const workload = selectWorkload({
+  difficulty: 'auto',
+  calibration: { iterations: 128, durationMs: 50 },
+  targetDurationMs: 750,
+  minDifficulty: 3,
+  maxDifficulty: 6,
+  minAmount: 1,
+  maxAmount: 8,
+});
+// { difficulty: 5, amount: 4, estimatedAttempts: ... }
+```
+
+Returns a `Workload` object with `{ difficulty, amount, estimatedAttempts }`. This is the same function `createChallenge()` calls internally when `difficulty` is `"auto"`.
 
 ## Server-Side: `verifySolution` (async)
 
@@ -216,3 +257,4 @@ When using the React wrapper (`ribaunt/widget-react`), all HTML attributes above
 | `onLoad` | `(detail) => void` | Alias for onReady (React-only) |
 | `onEvent` | `(type, detail) => void` | Catch-all for all event types |
 | `ref` | `React.Ref<RibauntWidgetHandle>` | Imperative handle for `reset()`, `getState()`, `startVerification()` |
+| `fallback` | `React.ReactNode` | Custom loading element while the widget's dynamic import loads. Defaults to a built-in shimmer skeleton. |

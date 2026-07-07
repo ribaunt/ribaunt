@@ -3,12 +3,15 @@
 Ribaunt now includes test coverage for the main integration layers:
 
 - server-side challenge creation, solving, verification, and edge cases
+- auto hardness via `selectWorkload()`, calibration raise-only semantics, `riskScore`, and bounded workload selection
+- `calibrateNode()` for server-side calibration and `calibrateBrowser()` for browser calibration
+- `calibrateClient` cross-environment alias in both Node and browser entry points
 - replay-prevention modes (default local/disabled/custom store)
 - optional verification warning callbacks (`onWarning`) and warning reasons
 - the browser solver in `src/solver.ts`
 - browser solver cancellation via `AbortSignal`
 - server-side solve guardrails (`maxIterations`, `maxDurationMs`)
-- the web component widget fetch/solve/verify flow
+- the web component widget fetch/solve/verify flow, including `calibrate` attribute POST flow
 - declarative widget auto-verification on load
 - widget opt-in solve-timeout failure path and warning animation behavior
 - widget challenge payload parsing for supported response shapes and malformed payload rejection
@@ -27,9 +30,9 @@ npm test -- --runInBand
 ## Main Test Files
 
 | File | Coverage |
-|---|---|
-| `tests/challenge.test.ts` | Server-side challenge flow, malformed tokens, async verification, replay modes, expiry, and invalid config |
-| `tests/solver.test.ts` | Browser solver token decoding, solving, progress reporting, invalid-token handling, cancellation, and missing Web Crypto behavior |
+|---|---|---|
+| `tests/challenge.test.ts` | Server-side challenge flow, malformed tokens, async verification, replay modes, expiry, invalid config, auto hardness (`selectWorkload`), calibration semantics, risk scores, and `calibrateNode` |
+| `tests/solver.test.ts` | Browser solver token decoding, solving, progress reporting, invalid-token handling, cancellation, missing Web Crypto behavior, and `calibrateBrowser` / `calibrateClient` |
 | `tests/widget.test.ts` | Widget fetch/solve/verify flow, auto-verify behavior, solve-timeout behavior, warning visibility animation, emitted events, disabled behavior, and listener lifecycle |
 | `tests/widget-react.test.tsx` | React wrapper prop syncing, including `autoVerify`, callback/event forwarding, and imperative ref methods |
 | `tests/package-smoke.test.ts` | Built ESM/CJS entry points, browser bundle loading, and package export targets |

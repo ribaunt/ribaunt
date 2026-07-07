@@ -68,6 +68,7 @@ You can load the script as an ES module directly in your HTML:
 - The recommended challenge endpoint response is `{ challenges: string[] }`.
 - For backwards compatibility, the widget also accepts `{ tokens: string[] }` and raw `string[]`.
 - Add `auto-verify="true"` when you want the widget to start solving immediately after it loads instead of waiting for a click or keyboard activation.
+- For auto-hardness (adaptive difficulty), use `challenge-method="POST"` and `calibrate="true"` to send a browser benchmark to your challenge endpoint. The server can then use `difficulty: "auto"` in `createChallenge()` to adjust the workload.
 - If you set `disabled` on `<ribaunt-widget>`, it now blocks both user interaction and `startVerification()`.
 - A disabled widget will not start from `auto-verify` until you trigger verification yourself after clearing `disabled`.
 - Remove the `disabled` attribute before expecting the widget to verify.

@@ -9,7 +9,7 @@ Dispatched when the solver successfully solves all challenges and the server end
 
 If no `verify-endpoint` is specified, it just means the solver finished its local work.
 
-**Event Type:** `CustomEvent<{ solutions: ChallengeSolution[] }>`
+**Event Type:** `CustomEvent<{ solutions: ChallengeSolution[]; phase: 'done'; progress: 100 }>`
 
 ```javascript
 widget.addEventListener('verify', (e) => {
@@ -22,37 +22,46 @@ widget.addEventListener('verify', (e) => {
 ## 2. `error`
 Dispatched when an error occurs fetching tokens, solving them, or verifying them with the server.
 
-**Event Type:** `CustomEvent<{ error: string }>`
+**Event Type:** `CustomEvent<{ error: string; code: WidgetErrorCode; timeout: boolean; phase: 'error' }>`
 
-The error event may also include a `timeout` boolean when `solve-timeout` is configured and solving exceeds that limit.
+The `code` field provides a machine-readable error classification:
 
-**Event Type (extended):** `CustomEvent<{ error: string; timeout?: boolean }>`
+| Code | Meaning |
+|---|---|
+| `timeout` | Solving exceeded the configured `solve-timeout`. |
+| `aborted` | Solving was cancelled (e.g. widget reset). |
+| `challenge-fetch-failed` | Challenge endpoint request failed. |
+| `invalid-challenge` | Challenge response had an unexpected shape. |
+| `solve-failed` | Solving produced no valid nonce. |
+| `verification-failed` | Server verify endpoint rejected the solution. |
+| `worker-unavailable` | Web Worker solver is not available. |
+| `unknown` | An unclassified error occurred. |
 
 ```javascript
 widget.addEventListener('error', (e) => {
-  const { error, timeout } = e.detail;
+  const { error, code, timeout } = e.detail;
   if (timeout) {
     console.warn('CAPTCHA timed out:', error);
     return;
   }
-  console.error('CAPTCHA failed:', error);
+  console.error('CAPTCHA failed:', error, `(code: ${code})`);
 });
 ```
 
 ## 3. `state-change`
 Dispatched every time the widget moves from one visual state to another.
 
-**Event Type:** `CustomEvent<{ state: 'initial' | 'verifying' | 'done' | 'error' }>`
+**Event Type:** `CustomEvent<{ state: WidgetState; phase: WidgetState; progress: number }>`
 
 ```javascript
 widget.addEventListener('state-change', (e) => {
-  const { state } = e.detail;
+  const { state, progress } = e.detail;
   switch (state) {
     case 'initial':
       console.log('Ready to solve');
       break;
     case 'verifying':
-      console.log('Solving PoW...');
+      console.log(`Solving PoW... ${progress}%`);
       break;
     case 'done':
       console.log('Done!');

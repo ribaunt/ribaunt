@@ -100,6 +100,6 @@ When using `challenge-endpoint`, the recommended response shape is `{ challenges
 
 For backwards compatibility, the widget also accepts `{ tokens: string[] }` and raw `string[]`.
 
-Use `auto-verify="true"` if the widget should start solving as soon as it mounts. If you bind `disabled`, note that the widget now treats it as a real interaction lock: clicks, keyboard activation, `startVerification()`, and `auto-verify` are blocked until the prop is cleared.
+Use `auto-verify="true"` if the widget should start solving as soon as it mounts. For auto-hardness (adaptive difficulty), add `challenge-method="POST"` and `:calibrate="true"` to send a browser benchmark to your challenge endpoint. If you bind `disabled`, note that the widget now treats it as a real interaction lock: clicks, keyboard activation, `startVerification()`, and `auto-verify` are blocked until the prop is cleared.
 
 If the browser does not expose `crypto.subtle`, verification will fail with a clear error indicating that HTTPS or `localhost` is required.
