@@ -195,6 +195,23 @@ const WIDGET_STYLES = `
     .logo {
       color: var(--ribaunt-logo-color, #999);
     }
+
+    .captcha[data-state=fetching] .checkbox::after,
+    .captcha[data-state=solving] .checkbox::after,
+    .captcha[data-state=verifying] .checkbox::after {
+      background-color: var(--ribaunt-background, #171717);
+    }
+
+    .captcha[data-state=fetching] .checkbox,
+    .captcha[data-state=solving] .checkbox,
+    .captcha[data-state=verifying] .checkbox {
+      background: conic-gradient(
+        var(--ribaunt-spinner-color, #eee) 0%, 
+        var(--ribaunt-spinner-color, #eee) var(--progress, 0%), 
+        var(--ribaunt-spinner-background-color, #333) var(--progress, 0%), 
+        var(--ribaunt-spinner-background-color, #333) 100%
+      );
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
