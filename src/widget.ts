@@ -94,7 +94,7 @@ const WIDGET_STYLES = `
     border: var(--ribaunt-checkbox-border, 1px solid #aaaaaad1);
     border-radius: var(--ribaunt-checkbox-border-radius, 6px);
     background-color: var(--ribaunt-checkbox-background, #fafafa91);
-    transition: opacity .2s;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     margin-top: var(--ribaunt-checkbox-margin, 2px);
     margin-bottom: var(--ribaunt-checkbox-margin, 2px);
     flex-shrink: 0;
@@ -142,8 +142,7 @@ const WIDGET_STYLES = `
       var(--ribaunt-spinner-background-color, #eee) 100%
     );
     position: relative;
-    animation: ribaunt-spin 2.5s linear infinite;
-    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .captcha[data-state=fetching] .checkbox::after,
@@ -155,7 +154,7 @@ const WIDGET_STYLES = `
     height: calc(100% - var(--ribaunt-spinner-thickness, 5px));
     border-radius: 50%;
     margin: calc(var(--ribaunt-spinner-thickness, 5px) / 2);
-    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   /* Done/Success State */
