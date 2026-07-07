@@ -486,7 +486,7 @@ export class RibauntWidget extends HTMLElement {
       case 'initial':
         return "I'm a human";
       case 'fetching':
-        return 'Preparing challenge...';
+        return '';
       case 'solving':
         return `Solving... ${this.progress}%`;
       case 'verifying':
@@ -494,7 +494,7 @@ export class RibauntWidget extends HTMLElement {
       case 'done':
         return "You're a human";
       case 'error':
-        return this.timeoutError ? 'Timed out. Try again.' : 'Error. Try again.';
+        return this.timeoutError ? 'Timed out.' : 'Error. Try again.';
     }
   }
 
@@ -746,7 +746,7 @@ export class RibauntWidget extends HTMLElement {
         new CustomEvent('error', {
           detail: {
             error: this.timeoutError
-              ? 'Timed out. Try again.'
+              ? 'Timed out.'
               : (error instanceof Error ? error.message : String(error)),
             code,
             timeout: this.timeoutError,
