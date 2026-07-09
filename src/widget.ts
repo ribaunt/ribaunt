@@ -123,7 +123,6 @@ const WIDGET_STYLES = `
     font-weight: 500;
     font-size: 15px;
     user-select: none;
-    transition: opacity .2s;
   }
 
   /* Verifying State */
@@ -142,7 +141,7 @@ const WIDGET_STYLES = `
       var(--ribaunt-spinner-background-color, #eee) 100%
     );
     position: relative;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: ribaunt-spin 2.5s linear infinite;
   }
 
   .captcha[data-state=fetching] .checkbox::after,
@@ -154,7 +153,6 @@ const WIDGET_STYLES = `
     height: calc(100% - var(--ribaunt-spinner-thickness, 5px));
     border-radius: 50%;
     margin: calc(var(--ribaunt-spinner-thickness, 5px) / 2);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   /* Done/Success State */
