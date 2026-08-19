@@ -20,6 +20,14 @@ Ribaunt is a stateless proof-of-work CAPTCHA library for Node.js and modern brow
 - CSS custom properties for theming
 - TypeScript types included
 
+## What Ribaunt does not do
+
+Read this before relying on Ribaunt alone.
+
+- **Ribaunt does not rate-limit your endpoints.** Nothing stops an attacker from hammering your challenge or verify endpoints themselves, no solving required. Put a rate limiter (per-IP, per-account, or WAF-level) in front of both.
+- **Ribaunt does not prove a human is present.** It raises the cost of automated abuse. A sufficiently resourced attacker can solve any proof-of-work challenge.
+- **Ribaunt is one layer, not the whole stack.** Use it behind rate limiting and risk signals, and never as the sole gate for sensitive actions such as password reset, account recovery, or payments.
+
 ## Install
 
 ```bash
