@@ -14,7 +14,7 @@ afterEach(() => {
 describe('worker solver client', () => {
   it('falls back to cooperative solving when workers are unavailable', async () => {
     vi.stubGlobal('Worker', undefined);
-    const [token] = createChallenge(1, 1);
+    const [token] = await createChallenge(1, 1);
 
     await expect(solveChallengeWithWorker([token!], undefined, undefined, 'preferred'))
       .resolves.toHaveLength(1);
@@ -27,20 +27,53 @@ describe('worker solver client', () => {
       .rejects.toBeInstanceOf(WorkerUnavailableError);
   });
 
-  it('terminates the worker when an attempt is aborted', async () => {
+  it('sends a cooperative cancel and falls back to termination when aborted', async () => {
+    vi.useFakeTimers();
     const terminate = vi.fn();
+    const postMessage = vi.fn();
     class PendingWorker extends EventTarget {
       terminate = terminate;
-      postMessage() {}
+      postMessage = postMessage;
     }
     vi.stubGlobal('Worker', PendingWorker);
+    const controller = new AbortController();
+    const solving = solveChallengeWithWorker(['token'], undefined, controller.signal, 'required');
+    const rejection = expect(solving).rejects.toMatchObject({ name: 'AbortError' });
+
+    controller.abort();
+
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'cancel',
+      id: expect.any(String),
+    }));
+    await vi.advanceTimersByTimeAsync(250);
+    await rejection;
+    expect(terminate).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('rejects promptly without terminating when the worker confirms cancellation', async () => {
+    const terminate = vi.fn();
+    class CooperativeWorker extends EventTarget {
+      terminate = terminate;
+      postMessage(message: { type: string; id: string }) {
+        if (message.type === 'cancel') {
+          queueMicrotask(() => {
+            this.dispatchEvent(new MessageEvent('message', {
+              data: { type: 'cancelled', id: message.id },
+            }));
+          });
+        }
+      }
+    }
+    vi.stubGlobal('Worker', CooperativeWorker);
     const controller = new AbortController();
     const solving = solveChallengeWithWorker(['token'], undefined, controller.signal, 'required');
 
     controller.abort();
 
     await expect(solving).rejects.toMatchObject({ name: 'AbortError' });
-    expect(terminate).toHaveBeenCalledTimes(1);
+    expect(terminate).not.toHaveBeenCalled();
   });
 
   it('forwards worker progress and resolves worker results', async () => {

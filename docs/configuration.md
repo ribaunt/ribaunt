@@ -10,8 +10,8 @@ The main function on the server side dictates how long the challenge takes to so
 import { createChallenge } from 'ribaunt';
 
 // Signature
-// createChallenge(difficulty: number, amount: number, ttlSeconds: number): string[]
-// createChallenge(options: ChallengeOptions): string[]
+// createChallenge(difficulty: number, amount: number, ttlSeconds: number): Promise<string[]>
+// createChallenge(options: ChallengeOptions): Promise<string[]>
 ```
 
 | Parameter | Type | Default | Description |
@@ -41,7 +41,7 @@ import { createChallenge } from 'ribaunt';
 Use `difficulty: "auto"` to adapt challenge work from a client benchmark while keeping the server in control.
 
 ```typescript
-const challenges = createChallenge({
+const challenges = await createChallenge({
   difficulty: 'auto',
   calibration: body.calibration,
   targetDurationMs: 750,

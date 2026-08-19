@@ -30,7 +30,7 @@ export async function POST(req: Request) {
 
     // Auto hardness is raise-only: calibration can increase work, but
     // cannot lower this server-owned baseline.
-    const challenges = createChallenge({
+    const challenges = await createChallenge({
       difficulty: 'auto',
       calibration,
       targetDurationMs: 750,
@@ -113,7 +113,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const { calibration } = req.body;
-    const challenges = createChallenge({
+    const challenges = await createChallenge({
       difficulty: 'auto',
       calibration,
       targetDurationMs: 750,
