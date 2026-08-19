@@ -24,7 +24,7 @@ Ribaunt is a stateless proof-of-work CAPTCHA library for Node.js and modern brow
 
 Read this before relying on Ribaunt alone.
 
-- **Ribaunt does not rate-limit your endpoints.** Nothing stops an attacker from hammering your challenge or verify endpoints themselves, no solving required. Put a rate limiter (per-IP, per-account, or WAF-level) in front of both.
+- **Ribaunt does not rate-limit your endpoints.** Nothing stops an attacker from hammering your challenge or verify endpoints themselves, no solving required. Put a rate limiter (per-IP, per-account, or WAF-level) in front of both. Ribaunt exposes optional rate-limit and telemetry hooks so you can wire your own limiter and metrics in at the point challenges are issued and verified (see `rateLimiter` and `onEvent` below).
 - **Ribaunt does not prove a human is present.** It raises the cost of automated abuse. A sufficiently resourced attacker can solve any proof-of-work challenge.
 - **Ribaunt is one layer, not the whole stack.** Use it behind rate limiting and risk signals, and never as the sole gate for sensitive actions such as password reset, account recovery, or payments.
 
@@ -64,8 +64,8 @@ const app = express();
 
 app.use(express.json());
 
-app.get('/api/captcha/challenge', (_req, res) => {
-  const challenges = createChallenge(5, 4, 120);
+app.get('/api/captcha/challenge', async (_req, res) => {
+  const challenges = await createChallenge(5, 4, 120);
   res.json({ challenges });
 });
 
@@ -137,10 +137,10 @@ For Next.js App Router, keep the widget in a client component. Do not expose `RI
 
 ### `createChallenge(difficulty, amount, ttlSeconds)`
 
-Creates signed challenge tokens.
+Creates signed challenge tokens. Since the optional `rateLimiter` hook can be async, `createChallenge()` returns a `Promise`:
 
 ```ts
-const challenges = createChallenge(5, 4, 120);
+const challenges = await createChallenge(5, 4, 120);
 ```
 
 | Parameter | Default | Description |
@@ -156,7 +156,7 @@ Validate user- or config-controlled values before passing them to `createChallen
 Creates adaptive challenge tokens from a server-bounded calibration hint. Calibration is untrusted and raise-only: it can increase work for fast clients, but it never lowers the server baseline.
 
 ```ts
-const challenges = createChallenge({
+const challenges = await createChallenge({
   difficulty: 'auto',
   calibration: requestBody.calibration,
   targetDurationMs: 750,
@@ -233,6 +233,55 @@ const result = await verifySolution(tokens, solutions, {
   },
 });
 ```
+
+### `rateLimiter` hook
+
+Ribaunt does not rate-limit anything itself — bring your own limiter. Both `createChallenge()` and `verifySolution()` accept an optional `rateLimiter: { check(key?) => Promise<boolean> }` that runs before the operation. If it returns `false`, issuance or verification is blocked with a `RateLimitedError` (`code = 'rate-limited'`) so you can catch it specifically. Errors thrown by your limiter propagate unchanged.
+
+```ts
+import { RateLimitedError } from 'ribaunt';
+
+const rateLimiter = {
+  check: async (key?: string) => (await redisBucket.hit(key ?? 'unknown')) < 10,
+};
+
+// Challenge endpoint: key on the client IP so each IP is limited independently.
+app.get('/api/captcha/challenge', async (req, res) => {
+  try {
+    const challenges = await createChallenge({
+      difficulty: 5,
+      amount: 4,
+      context: req.ip,
+      rateLimiter,
+    });
+    res.json({ challenges });
+  } catch (error) {
+    if (error instanceof RateLimitedError) {
+      return res.status(429).json({ error: 'Too many challenge requests' });
+    }
+    throw error;
+  }
+});
+```
+
+### `onEvent` telemetry hook
+
+Both entry points accept an optional synchronous `onEvent` callback for structured lifecycle events. It is fire-and-forget: a throwing consumer can never break challenge issuance or verification.
+
+```ts
+const counts = { issued: 0, success: 0, failure: 0 };
+
+const onEvent = (event: RibauntEvent) => {
+  if (event.type === 'challenge-issued') counts.issued += 1;
+  else if (event.type === 'verify-success') counts.success += 1;
+  else if (event.type === 'verify-failure') counts.failure += 1;
+};
+
+await createChallenge({ difficulty: 5, amount: 4, onEvent });
+const result = await verifySolution(tokens, solutions, { onEvent });
+```
+
+`verify-failure` events carry the same `reason` values as `VerifySolutionResult` (`invalid-token`, `expired-token`, `invalid-solution`, `context-mismatch`, `replay-detected`, `configuration-error`). Add aggregation over Windows, StatsD, or Prometheus yourself — Ribaunt only emits raw events.
 
 ### `solveChallenge(token, options?)`
 

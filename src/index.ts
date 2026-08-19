@@ -53,11 +53,26 @@ export interface ChallengeOptions {
   maxDifficulty?: number;
   minAmount?: number;
   maxAmount?: number;
+  rateLimiter?: RateLimiter;
+  onEvent?: (event: RibauntEvent) => void;
 }
 
 export interface ReplayStore {
   consume(jti: string, expiresAt: number): Promise<boolean>;
   consumeMany?(jtis: string[], expiresAt: number): Promise<boolean>;
+}
+
+export interface RateLimiter {
+  check(key?: string): Promise<boolean>;
+}
+
+export class RateLimitedError extends Error {
+  readonly code = 'rate-limited';
+
+  constructor(message = 'Rate limit exceeded') {
+    super(message);
+    this.name = 'RateLimitedError';
+  }
 }
 
 export type ReplayPreventionMode = 'disabled' | 'local' | 'remote';
@@ -68,6 +83,8 @@ export interface VerifySolutionOptions {
   context?: string;
   debug?: boolean;
   onWarning?: (warning: VerifyWarning) => void;
+  rateLimiter?: RateLimiter;
+  onEvent?: (event: RibauntEvent) => void;
 }
 
 export type VerifyFailureReason =
@@ -85,6 +102,11 @@ export interface VerifyWarning {
   message: string;
   error?: unknown;
 }
+
+export type RibauntEvent =
+  | { type: 'challenge-issued'; difficulty: number; amount: number }
+  | { type: 'verify-success' }
+  | { type: 'verify-failure'; reason: VerifyFailureReason; message: string };
 
 export type VerifySolutionResult =
   | { valid: true }
@@ -291,17 +313,29 @@ function createSingleChallenge(
   return jwt.sign(payload, getSecret(), { algorithm: 'HS256' });
 }
 
-export function createChallenge(
+function emitEvent(
+  options: { onEvent?: (event: RibauntEvent) => void } | undefined,
+  event: RibauntEvent
+): void {
+  if (!options?.onEvent) return;
+  try {
+    options.onEvent(event);
+  } catch {
+    // telemetry must never break challenge issuance or verification
+  }
+}
+
+export async function createChallenge(
   difficulty?: number,
   amount?: number,
   ttlSeconds?: number
-): ChallengeToken[];
-export function createChallenge(options: ChallengeOptions): ChallengeToken[];
-export function createChallenge(
+): Promise<ChallengeToken[]>;
+export async function createChallenge(options: ChallengeOptions): Promise<ChallengeToken[]>;
+export async function createChallenge(
   difficultyOrOptions: number | ChallengeOptions = 5,
   amount = 4,
   ttlSeconds = 30
-): ChallengeToken[] {
+): Promise<ChallengeToken[]> {
   const options = typeof difficultyOrOptions === 'object' ? difficultyOrOptions : undefined;
   const selectedWorkload = options?.workload
     ?? (options?.difficulty === 'auto' ? selectWorkload(options) : undefined);
@@ -324,10 +358,17 @@ export function createChallenge(
   }
   const normalizedTtl = assertFiniteInteger(ttlValue, 'Challenge TTL', 1);
 
-  return Array.from(
+  if (options?.rateLimiter) {
+    const allowed = await options.rateLimiter.check(options?.context);
+    if (!allowed) throw new RateLimitedError('Challenge issuance rate limited');
+  }
+
+  const challenges = Array.from(
     { length: normalizedAmount },
     () => createSingleChallenge(difficulty, normalizedTtl, options?.context)
   );
+  emitEvent(options, { type: 'challenge-issued', difficulty, amount: normalizedAmount });
+  return challenges;
 }
 
 function normalizeMaxIterations(options?: SolveChallengeOptions): number | undefined {
@@ -397,6 +438,7 @@ function warn(
     ? { reason, message }
     : { reason, message, error };
   options?.onWarning?.(warning);
+  emitEvent(options, { type: 'verify-failure', reason, message });
   if (shouldDebug(options)) {
     const details = error instanceof Error ? error.message : error;
     console.warn(`[ribaunt] ${message}`, details ?? '');
@@ -446,6 +488,10 @@ export async function verifySolution(
   nonce: number | string | Array<number | string> | ChallengeSolution | ChallengeSolution[],
   options?: VerifySolutionOptions
 ): Promise<VerifySolutionResult> {
+  if (options?.rateLimiter) {
+    const allowed = await options.rateLimiter.check(options?.context);
+    if (!allowed) throw new RateLimitedError('Challenge verification rate limited');
+  }
   const tokens = Array.isArray(token) ? token : [token];
   if (tokens.length === 0) {
     return warn('invalid-solution', 'verifySolution requires at least one challenge token', options);
@@ -516,6 +562,7 @@ export async function verifySolution(
       if (!consumed) return warn('replay-detected', 'verifySolution rejected a replayed token', options);
     }
 
+    emitEvent(options, { type: 'verify-success' });
     return { valid: true };
   } catch (error) {
     const reason = classifyTokenError(error);

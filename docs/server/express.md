@@ -29,13 +29,13 @@ if (!process.env.RIBAUNT_SECRET) {
 }
 
 // 1. Endpoint to generate a challenge
-app.post('/api/captcha/challenge', (req, res) => {
+app.post('/api/captcha/challenge', async (req, res) => {
   try {
     const { calibration } = req.body;
 
     // Auto hardness is raise-only: calibration can increase work, but
     // cannot lower this server-owned baseline.
-    const challenges = createChallenge({
+    const challenges = await createChallenge({
       difficulty: 'auto',
       calibration,
       targetDurationMs: 750,

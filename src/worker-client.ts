@@ -15,16 +15,24 @@ export class WorkerUnavailableError extends Error {
 }
 
 interface WorkerMessage {
-  type: 'progress' | 'result' | 'error';
+  type: 'progress' | 'result' | 'error' | 'cancelled';
   id: string;
   progress?: number;
   solutions?: ChallengeSolution[];
   error?: string;
 }
 
+interface WorkerRequest {
+  type: 'solve' | 'cancel';
+  id: string;
+  tokens?: string[];
+}
+
 function abortError(): DOMException {
   return new DOMException('Challenge solving aborted', 'AbortError');
 }
+
+const CANCEL_GRACE_MS = 250;
 
 function solveInWorker(
   tokens: string[],
@@ -46,39 +54,60 @@ function solveInWorker(
     }
 
     const id = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-    const cleanup = () => {
+    let cancelTimer: ReturnType<typeof setTimeout> | undefined;
+    let cancelled = false;
+
+    const release = () => {
+      if (cancelTimer !== undefined) clearTimeout(cancelTimer);
+      cancelTimer = undefined;
       signal?.removeEventListener('abort', handleAbort);
+    };
+    const finish = () => {
+      release();
       worker.terminate();
     };
     const handleAbort = () => {
-      cleanup();
-      reject(abortError());
+      if (cancelled) return;
+      cancelled = true;
+      worker.postMessage({ type: 'cancel', id } satisfies WorkerRequest);
+      cancelTimer = setTimeout(() => {
+        finish();
+        reject(abortError());
+      }, CANCEL_GRACE_MS);
     };
 
+    worker.addEventListener('message', (event: MessageEvent<WorkerMessage>) => {
+      const message = event.data;
+      if (!message || message.id !== id) return;
+      if (message.type === 'cancelled') {
+        release();
+        reject(abortError());
+        return;
+      }
+      if (cancelled) return;
+      if (message.type === 'progress' && message.progress !== undefined) {
+        onProgress?.(message.progress);
+      } else if (message.type === 'result' && message.solutions) {
+        finish();
+        resolve(message.solutions);
+      } else if (message.type === 'error') {
+        finish();
+        reject(new Error(message.error ?? 'Worker solving failed'));
+      }
+    });
+    worker.addEventListener('error', () => {
+      finish();
+      reject(new WorkerUnavailableError('The solver worker failed to load'));
+    }, { once: true });
+
     if (signal?.aborted) {
-      handleAbort();
+      finish();
+      reject(abortError());
       return;
     }
 
     signal?.addEventListener('abort', handleAbort, { once: true });
-    worker.addEventListener('error', () => {
-      cleanup();
-      reject(new WorkerUnavailableError('The solver worker failed to load'));
-    }, { once: true });
-    worker.addEventListener('message', (event: MessageEvent<WorkerMessage>) => {
-      const message = event.data;
-      if (!message || message.id !== id) return;
-      if (message.type === 'progress' && message.progress !== undefined) {
-        onProgress?.(message.progress);
-      } else if (message.type === 'result' && message.solutions) {
-        cleanup();
-        resolve(message.solutions);
-      } else if (message.type === 'error') {
-        cleanup();
-        reject(new Error(message.error ?? 'Worker solving failed'));
-      }
-    });
-    worker.postMessage({ type: 'solve', id, tokens });
+    worker.postMessage({ type: 'solve', id, tokens } satisfies WorkerRequest);
   });
 }
 

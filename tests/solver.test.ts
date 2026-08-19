@@ -21,7 +21,7 @@ describe('browser solver', () => {
   });
 
   it('solves a single valid challenge token', async () => {
-    const [token] = createChallenge(1, 1, 60);
+    const [token] = await createChallenge(1, 1, 60);
 
     const solution = await solveSingleChallenge(token);
 
@@ -46,7 +46,7 @@ describe('browser solver', () => {
   });
 
   it('solves multiple tokens and reports progress', async () => {
-    const [tokenA, tokenB] = createChallenge(1, 2, 60);
+    const [tokenA, tokenB] = await createChallenge(1, 2, 60);
     const onProgress = vi.fn();
 
     const solutions = await solveChallenge([tokenA, tokenB], onProgress);
@@ -65,7 +65,7 @@ describe('browser solver', () => {
   });
 
   it('throws a clear error when Web Crypto is unavailable', async () => {
-    const [token] = createChallenge(1, 1, 60);
+    const [token] = await createChallenge(1, 1, 60);
     const originalCrypto = globalThis.crypto;
 
     Object.defineProperty(globalThis, 'crypto', {
@@ -82,7 +82,7 @@ describe('browser solver', () => {
   });
 
   it('throws a clear error when TextEncoder is unavailable', async () => {
-    const [token] = createChallenge(1, 1, 60);
+    const [token] = await createChallenge(1, 1, 60);
     const originalTextEncoder = globalThis.TextEncoder;
 
     Object.defineProperty(globalThis, 'TextEncoder', {
@@ -113,7 +113,7 @@ describe('browser solver', () => {
   });
 
   it('aborts solving when signal is cancelled', async () => {
-    const [token] = createChallenge(7, 1, 60);
+    const [token] = await createChallenge(7, 1, 60);
     const controller = new AbortController();
 
     const promise = solveSingleChallenge(token, controller.signal);
@@ -122,8 +122,18 @@ describe('browser solver', () => {
     await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
   });
 
+  it('exits immediately when given a pre-aborted signal', async () => {
+    const [token] = await createChallenge(7, 1, 60);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(solveSingleChallenge(token, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+  });
+
   it('passes abort signal through solveChallenge', async () => {
-    const [tokenA, tokenB] = createChallenge(1, 2, 60);
+    const [tokenA, tokenB] = await createChallenge(1, 2, 60);
     const controller = new AbortController();
 
     const solutions = await solveChallenge([tokenA, tokenB], undefined, controller.signal);

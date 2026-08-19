@@ -5,6 +5,7 @@ import {
     selectWorkload,
     calibrateNode,
     LocalReplayStore,
+    RateLimitedError,
 } from '../src/index';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import jwt from 'jsonwebtoken';
@@ -32,14 +33,14 @@ afterEach(() => {
 });
 
 describe('test challenge flow', () => {
-    it('creates one challenge by default with the options API', () => {
-        expect(createChallenge({ difficulty: 2 })).toHaveLength(1);
-        expect(createChallenge(2)).toHaveLength(4);
+    it('creates one challenge by default with the options API', async () => {
+        await expect(createChallenge({ difficulty: 2 })).resolves.toHaveLength(1);
+        await expect(createChallenge(2)).resolves.toHaveLength(4);
     });
 
     it('binds signed challenges to an opaque context digest', async () => {
         const context = 'signup:user-42:attempt-7';
-        const [token] = createChallenge({ difficulty: 2, context });
+        const [token] = await createChallenge({ difficulty: 2, context });
         const solution = solveChallenge(token!);
         const payload = jwt.decode(token!) as Record<string, unknown>;
 
@@ -68,7 +69,7 @@ describe('test challenge flow', () => {
     });
 
     it('rejects unbound challenges when verification requires context', async () => {
-        const [token] = createChallenge(2, 1);
+        const [token] = await createChallenge(2, 1);
         const solution = solveChallenge(token!);
 
         await expect(verifySolution(token!, solution!, {
@@ -80,10 +81,10 @@ describe('test challenge flow', () => {
         });
     });
 
-    it('uses unlinkable context digests for separate challenges', () => {
+    it('uses unlinkable context digests for separate challenges', async () => {
         const context = 'signup:user-42';
-        const [firstToken] = createChallenge({ difficulty: 2, context });
-        const [secondToken] = createChallenge({ difficulty: 2, context });
+        const [firstToken] = await createChallenge({ difficulty: 2, context });
+        const [secondToken] = await createChallenge({ difficulty: 2, context });
         const firstPayload = jwt.decode(firstToken!) as Record<string, unknown>;
         const secondPayload = jwt.decode(secondToken!) as Record<string, unknown>;
 
@@ -99,10 +100,10 @@ describe('test challenge flow', () => {
         });
     });
 
-    it('rejects signing secrets shorter than 32 bytes', () => {
+    it('rejects signing secrets shorter than 32 bytes', async () => {
         process.env.RIBAUNT_SECRET = 'too-short';
 
-        expect(() => createChallenge({ difficulty: 2 })).toThrow(
+        await expect(createChallenge({ difficulty: 2 })).rejects.toThrow(
             'RIBAUNT_SECRET must be at least 32 bytes'
         );
     });
@@ -138,8 +139,8 @@ describe('test challenge flow', () => {
         })).toThrow('Calibration iterations must be at least 1');
     });
 
-    it('uses raise-only adaptive workload for auto difficulty challenges', () => {
-        const baseline = createChallenge({
+    it('uses raise-only adaptive workload for auto difficulty challenges', async () => {
+        const baseline = await createChallenge({
             difficulty: 'auto',
             riskScore: 0,
             minDifficulty: 3,
@@ -147,7 +148,7 @@ describe('test challenge flow', () => {
             minAmount: 1,
             maxAmount: 8,
         });
-        const slowClaim = createChallenge({
+        const slowClaim = await createChallenge({
             difficulty: 'auto',
             riskScore: 0,
             calibration: { iterations: 1, durationMs: 1_000_000 },
@@ -156,7 +157,7 @@ describe('test challenge flow', () => {
             minAmount: 1,
             maxAmount: 8,
         });
-        const fastClaim = createChallenge({
+        const fastClaim = await createChallenge({
             difficulty: 'auto',
             riskScore: 0,
             calibration: { iterations: 1_000_000, durationMs: 1 },
@@ -178,8 +179,8 @@ describe('test challenge flow', () => {
         expect(fastPayload.difficulty).toBe(6);
     });
 
-    it('lets explicit workload override auto difficulty selection', () => {
-        const tokens = createChallenge({
+    it('lets explicit workload override auto difficulty selection', async () => {
+        const tokens = await createChallenge({
             difficulty: 'auto',
             calibration: { iterations: 1_000_000, durationMs: 1 },
             workload: { difficulty: 2, amount: 2 },
@@ -197,8 +198,8 @@ describe('test challenge flow', () => {
         expect(calibration.durationMs).toBeGreaterThanOrEqual(1);
     });
 
-    it('uses an explicit workload when creating an options challenge', () => {
-        const tokens = createChallenge({
+    it('uses an explicit workload when creating an options challenge', async () => {
+        const tokens = await createChallenge({
             difficulty: 1,
             amount: 7,
             workload: { difficulty: 2, amount: 2 },
@@ -210,7 +211,7 @@ describe('test challenge flow', () => {
     });
 
     it('validates all batch proofs before atomically consuming replay keys', async () => {
-        const tokens = createChallenge(2, 2);
+        const tokens = await createChallenge(2, 2);
         const solutions = solveChallenge(tokens)!;
         const replayStore = {
             consume: vi.fn(async () => true),
@@ -237,7 +238,7 @@ describe('test challenge flow', () => {
     });
 
     it('requires atomic remote replay support for challenge batches', async () => {
-        const tokens = createChallenge(2, 2);
+        const tokens = await createChallenge(2, 2);
         const solutions = solveChallenge(tokens)!;
 
         await expect(verifySolution(tokens, solutions, {
@@ -250,8 +251,8 @@ describe('test challenge flow', () => {
         });
     });
 
-    it('creates the default number of JWT challenge tokens', () => {
-        const tokens = createChallenge(2,3);
+    it('creates the default number of JWT challenge tokens', async () => {
+        const tokens = await createChallenge(2,3);
 
         expect(Array.isArray(tokens)).toBe(true);
         expect(tokens).toHaveLength(3);
@@ -262,7 +263,7 @@ describe('test challenge flow', () => {
     });
 
     it('solves multiple challenges and validates each solution', async () => {
-        const tokens = createChallenge(2, 2);
+        const tokens = await createChallenge(2, 2);
         const solutions = solveChallenge(tokens);
 
         expect(Array.isArray(solutions)).toBe(true);
@@ -279,7 +280,7 @@ describe('test challenge flow', () => {
     });
 
             it('solves a single challenge and validates the solution', async () => {
-        const [token] = createChallenge(3, 1);
+        const [token] = await createChallenge(3, 1);
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
@@ -291,13 +292,13 @@ describe('test challenge flow', () => {
     });
 
     it('rejects an invalid nonce for a valid token', async () => {
-        const [token] = createChallenge(3, 1);
+        const [token] = await createChallenge(3, 1);
         const isValid = await verifyValid(token, 'invalid-nonce');
         expect(isValid).toBe(false);
     });
 
     it('returns false when the challenge token is tampered with', async () => {
-        const [token] = createChallenge(3, 1);
+        const [token] = await createChallenge(3, 1);
         const tamperedToken = `${token}tampered`;
         const solution = solveChallenge(token);
 
@@ -310,15 +311,15 @@ describe('test challenge flow', () => {
         expect(solution).toBeUndefined();
     });
 
-    it('returns undefined when solve guard maxIterations is reached', () => {
-        const [token] = createChallenge(10, 1);
+    it('returns undefined when solve guard maxIterations is reached', async () => {
+        const [token] = await createChallenge(10, 1);
         const solution = solveChallenge(token, { maxIterations: 1 });
         expect(solution).toBeUndefined();
     });
 
-    it('normalizes solve guard edge values', () => {
-        const [token] = createChallenge(2, 1);
-        const [hardToken] = createChallenge(10, 1);
+    it('normalizes solve guard edge values', async () => {
+        const [token] = await createChallenge(2, 1);
+        const [hardToken] = await createChallenge(10, 1);
 
         expect(solveChallenge(token, { maxIterations: Number.NaN })).toBeTruthy();
         expect(solveChallenge(token, { maxIterations: 0 })).toBeUndefined();
@@ -327,8 +328,8 @@ describe('test challenge flow', () => {
         expect(solveChallenge(hardToken, { maxDurationMs: 0 })).toBeUndefined();
     });
 
-    it('returns undefined when any token in an array cannot be solved', () => {
-        const [token] = createChallenge(2, 1);
+    it('returns undefined when any token in an array cannot be solved', async () => {
+        const [token] = await createChallenge(2, 1);
 
         expect(solveChallenge([token, 'not-a-valid-token'])).toBeUndefined();
         expect(solveChallenge({} as never)).toBeUndefined();
@@ -346,7 +347,7 @@ describe('test challenge flow', () => {
     });
 
     it('marks mismatched nonce arrays as invalid', async () => {
-        const tokens = createChallenge(3, 2);
+        const tokens = await createChallenge(3, 2);
         const verification = await verifyValid(tokens, ['only-one-nonce']);
 
         expect(verification).toBe(false);
@@ -357,7 +358,7 @@ describe('test challenge flow', () => {
         const issuedAt = new Date('2026-01-01T00:00:00Z');
         vi.setSystemTime(issuedAt);
 
-        const [token] = createChallenge(2, 1, 1);
+        const [token] = await createChallenge(2, 1, 1);
         const solution = solveChallenge(token);
 
         vi.setSystemTime(new Date('2026-01-01T00:00:03Z'));
@@ -398,7 +399,7 @@ describe('test challenge flow', () => {
 
     it('emits debug warnings for direct validation failures', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
 
         await expect(verifyValid(token, null as never, { debug: true })).resolves.toBe(false);
 
@@ -408,7 +409,7 @@ describe('test challenge flow', () => {
 
     it('handles non-Error verification failures', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
         const replayStore = {
             consume: async () => {
@@ -428,7 +429,7 @@ describe('test challenge flow', () => {
 
     it('logs an empty detail for undefined verification failures', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
         const replayStore = {
             consume: async () => {
@@ -478,7 +479,7 @@ describe('test challenge flow', () => {
 
     it('emits replay-detected warning reason when replay protection blocks a token reuse', async () => {
         const onWarning = vi.fn();
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
@@ -503,7 +504,7 @@ describe('test challenge flow', () => {
         vi.useFakeTimers();
         const onWarning = vi.fn();
         vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
-        const [token] = createChallenge(2, 1, 1);
+        const [token] = await createChallenge(2, 1, 1);
         const solution = solveChallenge(token);
 
         vi.setSystemTime(new Date('2026-01-01T00:00:03Z'));
@@ -515,7 +516,7 @@ describe('test challenge flow', () => {
     });
 
     it('rejects invalid nonce payload shapes', async () => {
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
 
         await expect(verifyValid(token, { nonce: '', hash: '' })).resolves.toBe(false);
         await expect(verifyValid(token, { nonce: null } as never)).resolves.toBe(false);
@@ -528,9 +529,9 @@ describe('test challenge flow', () => {
     });
 
     it('accepts solution object arrays and single-item nonce arrays', async () => {
-        const tokens = createChallenge(2, 2, 30);
+        const tokens = await createChallenge(2, 2, 30);
         const solutions = solveChallenge(tokens);
-        const [singleToken] = createChallenge(2, 1, 30);
+        const [singleToken] = await createChallenge(2, 1, 30);
         const singleSolution = solveChallenge(singleToken);
 
         expect(Array.isArray(solutions)).toBe(true);
@@ -546,7 +547,7 @@ describe('test challenge flow', () => {
     });
 
     it('accepts numeric nonce values', async () => {
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
@@ -556,7 +557,7 @@ describe('test challenge flow', () => {
     });
 
     it('blocks replay by default with local replay prevention', async () => {
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
@@ -565,7 +566,7 @@ describe('test challenge flow', () => {
     });
 
     it('allows repeated submissions only when replay prevention is explicitly disabled', async () => {
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
@@ -574,7 +575,7 @@ describe('test challenge flow', () => {
     });
 
     it('keeps local replay prevention behavior explicit', async () => {
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
@@ -583,7 +584,7 @@ describe('test challenge flow', () => {
     });
 
     it('supports custom remote replay stores', async () => {
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
         const consumed = new Set<string>();
 
@@ -623,7 +624,7 @@ describe('test challenge flow', () => {
     });
 
     it('throws when remote replay prevention is selected without a store', async () => {
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
@@ -632,24 +633,24 @@ describe('test challenge flow', () => {
         })).resolves.toBe(false);
     });
 
-    it('throws for invalid challenge config values', () => {
-        expect(() => createChallenge(0, 1, 30)).toThrow('Challenge difficulty must be at least 1');
-        expect(() => createChallenge(1, 0, 30)).toThrow('Challenge amount must be at least 1');
-        expect(() => createChallenge(1, 1, 0)).toThrow('Challenge TTL must be at least 1 second');
-        expect(() => createChallenge(1, Number.NaN, 30)).toThrow('Challenge amount must be a finite number');
-        expect(() => createChallenge(Number.NaN, 1, 30)).toThrow('Challenge difficulty must be a finite number');
-        expect(() => createChallenge(1, 1, Number.NaN)).toThrow('Challenge TTL must be a finite number');
+    it('throws for invalid challenge config values', async () => {
+        await expect(createChallenge(0, 1, 30)).rejects.toThrow('Challenge difficulty must be at least 1');
+        await expect(createChallenge(1, 0, 30)).rejects.toThrow('Challenge amount must be at least 1');
+        await expect(createChallenge(1, 1, 0)).rejects.toThrow('Challenge TTL must be at least 1 second');
+        await expect(createChallenge(1, Number.NaN, 30)).rejects.toThrow('Challenge amount must be a finite number');
+        await expect(createChallenge(Number.NaN, 1, 30)).rejects.toThrow('Challenge difficulty must be a finite number');
+        await expect(createChallenge(1, 1, Number.NaN)).rejects.toThrow('Challenge TTL must be a finite number');
     });
 
     it('throws when secret-dependent operations run without RIBAUNT_SECRET', async () => {
         delete process.env.RIBAUNT_SECRET;
 
-        expect(() => createChallenge(1, 1, 30)).toThrow('RIBAUNT_SECRET environment variable is not set!');
+        await expect(createChallenge(1, 1, 30)).rejects.toThrow('RIBAUNT_SECRET environment variable is not set!');
         await expect(verifyValid('not-a-real-token', '1', { debug: false })).resolves.toBe(false);
     });
 
     it('rejects tokens not signed with the pinned HS256 algorithm', async () => {
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
         const forged = jwt.sign(
             jwt.decode(token!) as object,
@@ -666,7 +667,7 @@ describe('test challenge flow', () => {
     });
 
     it('rejects tokens whose header declares a disastrous algorithm', async () => {
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
         const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
         const body = Buffer.from(JSON.stringify(jwt.decode(token!))).toString('base64url');
@@ -678,7 +679,7 @@ describe('test challenge flow', () => {
     });
 
     it('rejects tokens whose payload was tampered with after signing', async () => {
-        const [token] = createChallenge(3, 1, 30);
+        const [token] = await createChallenge(3, 1, 30);
         const payload = jwt.decode(token!) as Record<string, unknown>;
         const tampered = jwt.sign(
             { ...payload, difficulty: 6, challenge: 'changed-after-signing' },
@@ -689,7 +690,7 @@ describe('test challenge flow', () => {
     });
 
     it('rejects tokens with malformed context hashes', async () => {
-        const [token] = createChallenge(3, 1, 30);
+        const [token] = await createChallenge(3, 1, 30);
         const solution = solveChallenge(token);
         const payload = jwt.decode(token!) as Record<string, unknown>;
 
@@ -701,7 +702,7 @@ describe('test challenge flow', () => {
     });
 
     it('rejects tokens with non-integer or negative expiry values', async () => {
-        const [token] = createChallenge(3, 1, 30);
+        const [token] = await createChallenge(3, 1, 30);
         const payload = jwt.decode(token!) as Record<string, unknown>;
 
         for (const expires of ['1234', -5, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
@@ -711,7 +712,7 @@ describe('test challenge flow', () => {
     });
 
     it('rejects tokens expiring in the past', async () => {
-        const [token] = createChallenge(3, 1, 30);
+        const [token] = await createChallenge(3, 1, 30);
         const payload = jwt.decode(token!) as Record<string, unknown>;
         const expired = jwt.sign(
             { ...payload, expires: Math.floor(Date.now() / 1000) - 1 },
@@ -728,12 +729,12 @@ describe('test challenge flow', () => {
         await expect(verifyValid(megaGarbage, '1', { debug: false })).resolves.toBe(false);
     }, 5_000);
 
-    it('rejects absurd challenge amounts rather than allocating', () => {
-        expect(() => createChallenge(2, 2 ** 32, 30)).toThrow(RangeError);
+    it('rejects absurd challenge amounts rather than allocating', async () => {
+        await expect(createChallenge(2, 2 ** 32, 30)).rejects.toThrow(RangeError);
     });
 
     it('verifies full-range difficulty 64 prefixes without pathological slowdown', async () => {
-        const [token] = createChallenge(64, 1, 30);
+        const [token] = await createChallenge(64, 1, 30);
         const elapsed = process.hrtime.bigint();
 
         const result = await verifyValid(token, '0', { debug: false });
@@ -745,7 +746,7 @@ describe('test challenge flow', () => {
 
     it('hashes megabyte-scale contexts without pathological slowdown', async () => {
         const context = 'a'.repeat(4 * 1024 * 1024);
-        const [token] = createChallenge({ difficulty: 3, context });
+        const [token] = await createChallenge({ difficulty: 3, context });
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
@@ -759,7 +760,7 @@ describe('test challenge flow', () => {
     }, 5_000);
 
     it('allows exactly one success when the same token is verified concurrently', async () => {
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
 
         expect(solution).toBeTruthy();
@@ -772,7 +773,7 @@ describe('test challenge flow', () => {
     });
 
     it('allows exactly one success for concurrent duplicate batch submissions', async () => {
-        const tokens = createChallenge(2, 3, 30);
+        const tokens = await createChallenge(2, 3, 30);
         const solutions = solveChallenge(tokens);
 
         expect(solutions).toBeTruthy();
@@ -785,8 +786,8 @@ describe('test challenge flow', () => {
     });
 
     it('rejects overlapping batches that share a consumed jti', async () => {
-        const [firstToken] = createChallenge(2, 1, 30);
-        const [secondToken] = createChallenge(2, 1, 30);
+        const [firstToken] = await createChallenge(2, 1, 30);
+        const [secondToken] = await createChallenge(2, 1, 30);
         const firstSolution = solveChallenge(firstToken);
         const secondSolution = solveChallenge(secondToken);
 
@@ -798,7 +799,7 @@ describe('test challenge flow', () => {
     });
 
     it('can use an isolated local replay store instance', async () => {
-        const [token] = createChallenge(2, 1, 30);
+        const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
         const localStore = new LocalReplayStore();
 
@@ -817,5 +818,121 @@ describe('test challenge flow', () => {
             replayPrevention: 'remote',
             replayStore: adapter,
         })).resolves.toBe(false);
+    });
+
+    describe('rate limit hook', () => {
+        it('calls the limiter with the provided context before issuing and verifying', async () => {
+            const check = vi.fn(async () => true);
+            const [token] = await createChallenge({
+                difficulty: 2,
+                context: 'signup:u1',
+                rateLimiter: { check },
+            });
+            expect(check).toHaveBeenCalledWith('signup:u1');
+
+            const solution = solveChallenge(token);
+            await expect(verifyValid(token, solution!.nonce, {
+                context: 'signup:u1',
+                replayPrevention: 'disabled',
+                rateLimiter: { check },
+            })).resolves.toBe(true);
+            expect(check).toHaveBeenLastCalledWith('signup:u1');
+        });
+
+        it('blocks issuance with RateLimitedError when the limiter denies', async () => {
+            await expect(createChallenge({
+                difficulty: 2,
+                rateLimiter: { check: async () => false },
+            })).rejects.toBeInstanceOf(RateLimitedError);
+        });
+
+        it('blocks verification with RateLimitedError when the limiter denies', async () => {
+            const [token] = await createChallenge(2, 1, 30);
+            await expect(verifySolution(token, '1', {
+                rateLimiter: { check: async () => false },
+            })).rejects.toBeInstanceOf(RateLimitedError);
+        });
+
+        it('propagates limiter failures instead of issuing a challenge', async () => {
+            await expect(createChallenge({
+                difficulty: 2,
+                rateLimiter: {
+                    check: async () => {
+                        throw new Error('redis unavailable');
+                    },
+                },
+            })).rejects.toThrow('redis unavailable');
+        });
+
+        it('is a complete no-op when omitted', async () => {
+            const [token] = await createChallenge(2, 1, 30);
+            expect(token).toBeTruthy();
+        });
+    });
+
+    describe('telemetry events', () => {
+        it('emits challenge-issued when challenges are created', async () => {
+            const onEvent = vi.fn();
+            await createChallenge({ difficulty: 2, amount: 3, onEvent });
+
+            expect(onEvent).toHaveBeenCalledWith({
+                type: 'challenge-issued',
+                difficulty: 2,
+                amount: 3,
+            });
+        });
+
+        it('emits verify-success for valid solutions', async () => {
+            const onEvent = vi.fn();
+            const [token] = await createChallenge(2, 1, 30);
+            const solution = solveChallenge(token);
+
+            await expect(verifyValid(token, solution!.nonce, {
+                onEvent,
+                replayPrevention: 'disabled',
+            })).resolves.toBe(true);
+            expect(onEvent).toHaveBeenCalledWith({ type: 'verify-success' });
+        });
+
+        it('emits verify-failure with the existing reason taxonomy', async () => {
+            const onEvent = vi.fn();
+            const [token] = await createChallenge(2, 1, 30);
+
+            await expect(verifyValid(token, 'bad-nonce', {
+                onEvent,
+                replayPrevention: 'disabled',
+            })).resolves.toBe(false);
+            expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+                type: 'verify-failure',
+                reason: 'invalid-solution',
+            }));
+        });
+
+        it('emits replay detection as a verify-failure with the verify reason', async () => {
+            const onEvent = vi.fn();
+            const [token] = await createChallenge(2, 1, 30);
+            const solution = solveChallenge(token);
+
+            await expect(verifyValid(token, solution!.nonce, { onEvent })).resolves.toBe(true);
+            await expect(verifyValid(token, solution!.nonce, { onEvent })).resolves.toBe(false);
+            expect(onEvent).toHaveBeenLastCalledWith(expect.objectContaining({
+                type: 'verify-failure',
+                reason: 'replay-detected',
+            }));
+        });
+
+        it('never lets a throwing telemetry consumer break issuance or verification', async () => {
+            const onEvent = vi.fn(() => {
+                throw new Error('consumer exploded');
+            });
+            const [token] = await createChallenge({ difficulty: 2, onEvent });
+            const solution = solveChallenge(token);
+
+            await expect(verifyValid(token, solution!.nonce, {
+                onEvent,
+                replayPrevention: 'disabled',
+            })).resolves.toBe(true);
+            expect(onEvent).toHaveBeenCalled();
+        });
     });
 });

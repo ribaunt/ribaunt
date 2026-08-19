@@ -27,7 +27,7 @@ describe.skipIf(!redisUrl)('Redis replay store concurrency', () => {
 
   it('allows exactly one concurrent winner for single-token verification', async () => {
     const store = createIORedisReplayStore(redis, { prefix });
-    const [token] = createChallenge(2, 1, 30);
+    const [token] = await createChallenge(2, 1, 30);
     const solution = solveChallenge(token);
     expect(solution).toBeTruthy();
 
@@ -48,7 +48,7 @@ describe.skipIf(!redisUrl)('Redis replay store concurrency', () => {
 
   it('allows exactly one concurrent winner for duplicate batches', async () => {
     const store = createIORedisReplayStore(redis, { prefix });
-    const tokens = createChallenge(2, 3, 30);
+    const tokens = await createChallenge(2, 3, 30);
     const solutions = solveChallenge(tokens);
     expect(solutions).toBeTruthy();
 
@@ -65,9 +65,9 @@ describe.skipIf(!redisUrl)('Redis replay store concurrency', () => {
 
   it('rejects every batch when an overlapping submission already consumed a shared jti', async () => {
     const store = createIORedisReplayStore(redis, { prefix });
-    const [firstToken] = createChallenge(2, 1, 30);
-    const [secondToken] = createChallenge(2, 1, 30);
-    const [thirdToken] = createChallenge(2, 1, 30);
+    const [firstToken] = await createChallenge(2, 1, 30);
+    const [secondToken] = await createChallenge(2, 1, 30);
+    const [thirdToken] = await createChallenge(2, 1, 30);
     const firstSolution = solveChallenge(firstToken);
     const secondSolution = solveChallenge(secondToken);
     const thirdSolution = solveChallenge(thirdToken);
@@ -95,7 +95,7 @@ describe.skipIf(!redisUrl)('Redis replay store concurrency', () => {
       maxRetriesPerRequest: 1,
       retryStrategy: () => 100,
     }), { prefix });
-    const [token] = createChallenge(2, 1, 30);
+    const [token] = await createChallenge(2, 1, 30);
     const solution = solveChallenge(token);
     expect(solution).toBeTruthy();
 

@@ -84,7 +84,7 @@ import { createChallenge } from 'ribaunt';
 
 export async function GET() {
   // Generates 4 challenges, difficulty 5, expiring in 300 seconds
-  const challenges = createChallenge(5, 4, 300);
+  const challenges = await createChallenge(5, 4, 300);
   return NextResponse.json({ challenges });
 }
 ```

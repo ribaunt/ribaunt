@@ -37,9 +37,9 @@ const app = express();
 app.use(express.json());
 
 // 1. Endpoint to get a challenge
-app.get('/api/captcha/challenge', (req, res) => {
+app.get('/api/captcha/challenge', async (req, res) => {
   // Generate 4 challenges with difficulty 5, valid for 300 seconds
-  const challenges = createChallenge(5, 4, 300);
+  const challenges = await createChallenge(5, 4, 300);
   res.json({ challenges });
 });
 
