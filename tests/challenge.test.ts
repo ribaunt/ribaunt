@@ -648,6 +648,155 @@ describe('test challenge flow', () => {
         await expect(verifyValid('not-a-real-token', '1', { debug: false })).resolves.toBe(false);
     });
 
+    it('rejects tokens not signed with the pinned HS256 algorithm', async () => {
+        const [token] = createChallenge(2, 1, 30);
+        const solution = solveChallenge(token);
+        const forged = jwt.sign(
+            jwt.decode(token!) as object,
+            crypto.randomBytes(32),
+            { algorithm: 'HS512' }
+        );
+
+        expect(solution).toBeTruthy();
+        const result = await Promise.race([
+            verifyValid(forged, solution!.nonce, { debug: false }),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 2_000).unref()),
+        ]);
+        expect(result).toBe(false);
+    });
+
+    it('rejects tokens whose header declares a disastrous algorithm', async () => {
+        const [token] = createChallenge(2, 1, 30);
+        const solution = solveChallenge(token);
+        const header = Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url');
+        const body = Buffer.from(JSON.stringify(jwt.decode(token!))).toString('base64url');
+        const noneToken = `${header}.${body}.`;
+
+        expect(solution).toBeTruthy();
+        await expect(verifyValid(noneToken, solution!.nonce, { debug: false }))
+            .resolves.toBe(false);
+    });
+
+    it('rejects tokens whose payload was tampered with after signing', async () => {
+        const [token] = createChallenge(3, 1, 30);
+        const payload = jwt.decode(token!) as Record<string, unknown>;
+        const tampered = jwt.sign(
+            { ...payload, difficulty: 6, challenge: 'changed-after-signing' },
+            process.env.RIBAUNT_SECRET!.slice(0, -1) + 'x',
+        );
+
+        await expect(verifyValid(tampered, '0', { debug: false })).resolves.toBe(false);
+    });
+
+    it('rejects tokens with malformed context hashes', async () => {
+        const [token] = createChallenge(3, 1, 30);
+        const solution = solveChallenge(token);
+        const payload = jwt.decode(token!) as Record<string, unknown>;
+
+        for (const contextHash of ['abc', 'zz'.repeat(32), 'a'.repeat(63)]) {
+            const malformed = jwt.sign({ ...payload, contextHash }, process.env.RIBAUNT_SECRET!);
+            await expect(verifyValid(malformed, solution!.nonce, { debug: false }))
+                .resolves.toBe(false);
+        }
+    });
+
+    it('rejects tokens with non-integer or negative expiry values', async () => {
+        const [token] = createChallenge(3, 1, 30);
+        const payload = jwt.decode(token!) as Record<string, unknown>;
+
+        for (const expires of ['1234', -5, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+            const malformed = jwt.sign({ ...payload, expires }, process.env.RIBAUNT_SECRET!);
+            await expect(verifyValid(malformed, '0', { debug: false })).resolves.toBe(false);
+        }
+    });
+
+    it('rejects tokens expiring in the past', async () => {
+        const [token] = createChallenge(3, 1, 30);
+        const payload = jwt.decode(token!) as Record<string, unknown>;
+        const expired = jwt.sign(
+            { ...payload, expires: Math.floor(Date.now() / 1000) - 1 },
+            process.env.RIBAUNT_SECRET!
+        );
+
+        await expect(verifyValid(expired, '0', { debug: false })).resolves.toBe(false);
+    });
+
+    it('rejects empty and megabyte-scale garbage tokens without hanging', async () => {
+        const megaGarbage = 'x'.repeat(1024 * 1024);
+
+        await expect(verifyValid('', '1', { debug: false })).resolves.toBe(false);
+        await expect(verifyValid(megaGarbage, '1', { debug: false })).resolves.toBe(false);
+    }, 5_000);
+
+    it('rejects absurd challenge amounts rather than allocating', () => {
+        expect(() => createChallenge(2, 2 ** 32, 30)).toThrow(RangeError);
+    });
+
+    it('verifies full-range difficulty 64 prefixes without pathological slowdown', async () => {
+        const [token] = createChallenge(64, 1, 30);
+        const elapsed = process.hrtime.bigint();
+
+        const result = await verifyValid(token, '0', { debug: false });
+
+        const milliseconds = Number(process.hrtime.bigint() - elapsed) / 1_000_000;
+        expect(result).toBe(false);
+        expect(milliseconds).toBeLessThan(500);
+    }, 5_000);
+
+    it('hashes megabyte-scale contexts without pathological slowdown', async () => {
+        const context = 'a'.repeat(4 * 1024 * 1024);
+        const [token] = createChallenge({ difficulty: 3, context });
+        const solution = solveChallenge(token);
+
+        expect(solution).toBeTruthy();
+        const startedAt = Date.now();
+        const result = await verifyValid(token, solution!.nonce, {
+            context,
+            replayPrevention: 'disabled',
+        });
+        expect(result).toBe(true);
+        expect(Date.now() - startedAt).toBeLessThan(500);
+    }, 5_000);
+
+    it('allows exactly one success when the same token is verified concurrently', async () => {
+        const [token] = createChallenge(2, 1, 30);
+        const solution = solveChallenge(token);
+
+        expect(solution).toBeTruthy();
+        const results = await Promise.allSettled(
+            Array.from({ length: 100 }, () => verifyValid(token!, solution!.nonce))
+        );
+        const successes = results.filter((result) => result.status === 'fulfilled' && result.value);
+
+        expect(successes).toHaveLength(1);
+    });
+
+    it('allows exactly one success for concurrent duplicate batch submissions', async () => {
+        const tokens = createChallenge(2, 3, 30);
+        const solutions = solveChallenge(tokens);
+
+        expect(solutions).toBeTruthy();
+        const results = await Promise.allSettled(
+            Array.from({ length: 50 }, () => verifyValid(tokens, solutions!))
+        );
+        const successes = results.filter((result) => result.status === 'fulfilled' && result.value);
+
+        expect(successes).toHaveLength(1);
+    });
+
+    it('rejects overlapping batches that share a consumed jti', async () => {
+        const [firstToken] = createChallenge(2, 1, 30);
+        const [secondToken] = createChallenge(2, 1, 30);
+        const firstSolution = solveChallenge(firstToken);
+        const secondSolution = solveChallenge(secondToken);
+
+        expect(firstSolution).toBeTruthy();
+        expect(secondSolution).toBeTruthy();
+        await expect(verifyValid(firstToken, firstSolution!.nonce)).resolves.toBe(true);
+        await expect(verifyValid([firstToken, secondToken], [firstSolution, secondSolution]))
+            .resolves.toBe(false);
+    });
+
     it('can use an isolated local replay store instance', async () => {
         const [token] = createChallenge(2, 1, 30);
         const solution = solveChallenge(token);

@@ -288,7 +288,7 @@ function createSingleChallenge(
     jti,
   };
   if (context !== undefined) payload.contextHash = hashContext(context, jti);
-  return jwt.sign(payload, getSecret());
+  return jwt.sign(payload, getSecret(), { algorithm: 'HS256' });
 }
 
 export function createChallenge(
@@ -476,7 +476,7 @@ export async function verifySolution(
         return warn('invalid-solution', 'verifySolution received an empty nonce', options);
       }
 
-      const decoded = jwt.verify(currentToken, getSecret());
+      const decoded = jwt.verify(currentToken, getSecret(), { algorithms: ['HS256'] });
       if (!isValidPayload(decoded)) throw new Error('Invalid challenge token payload');
       const payload = decoded;
       if (payload.expires < Math.floor(Date.now() / 1000)) {
