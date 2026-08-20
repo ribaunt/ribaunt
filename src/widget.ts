@@ -237,6 +237,11 @@ const WIDGET_STYLES = `
      opacity pulse (show-progress="false"). The container never rotates and
      each bar carries one static transform; the only animation is a symmetric
      opacity pulse shared by all bars via a per-bar delay.
+     Like the conic loader, the checkbox box morphs into a round spinner on
+     entering the loading states: the base .checkbox transition animates the
+     square -> circle (border-radius), border removal and transparency, so
+     both loaders transforms look identical. Reduced motion kills all shell
+     animation (transition: none) while the bars keep their static position.
      The loader group (spinner + label) is left-aligned and shares a single
      color: the bars draw with currentColor, which resolves to the same color
      the "Loading..." text uses. The logo is absolutely positioned, so the
@@ -266,6 +271,8 @@ const WIDGET_STYLES = `
   .captcha[data-state=verifying] .checkbox.bars {
     animation: none;
     background: none;
+    border: none;
+    border-radius: 50%;
     position: relative;
   }
 

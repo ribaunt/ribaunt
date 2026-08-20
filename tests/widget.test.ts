@@ -480,10 +480,14 @@ describe('RibauntWidget', () => {
 
     const captcha = widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement;
     const checkbox = widget.shadowRoot?.querySelector('.checkbox') as HTMLDivElement;
+    const sheet = widget.shadowRoot?.querySelector('style')?.textContent ?? '';
+    const barsBoxRule = sheet.match(/[^{]*\.checkbox\.bars[^{]*\{[^}]*\}/)?.[0] ?? '';
 
     expect(captcha.getAttribute('data-state')).toBe('solving');
     expect(checkbox.classList.contains('bars')).toBe(true);
     expect(checkbox.querySelectorAll('.bar')).toHaveLength(12);
+    expect(barsBoxRule).toContain('border-radius: 50%');
+    expect(barsBoxRule).toContain('border: none');
     expect(captcha.querySelector('p')?.textContent).toBe('Loading...');
     expect(captcha.textContent).not.toContain('%');
     expect(captcha.style.getPropertyValue('--progress')).toBe('');
