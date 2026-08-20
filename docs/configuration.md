@@ -197,6 +197,7 @@ Plain LAN URLs such as `http://192.168.x.x` may not expose `crypto.subtle`, espe
 | `calibrate` | `calibrate` | `boolean\|string` | `false` | Sends `{ calibration }` with POST challenge requests. |
 | `show-warning` | `showWarning` | `boolean\|string` | `false` | Shows a red warning banner above the widget. Often used to alert users if WebAssembly is missing for future fast-solvers. |
 | `warning-message` | `warningMessage` | `string` | `"Enable WASM..."` | Custom message text for the warning banner. |
+| `show-progress` | `showProgress` | `boolean\|string` | `true` | Set to `"false"` to switch to the secondary loader: a plain bars spinner with a static `Loading...` label instead of the conic progress ring and percentage counter. Progress is still tracked and reported through events. |
 | `solve-timeout` | `solveTimeout` | `number\|string` | `undefined` | Optional timeout in milliseconds for solving. If omitted, solving is not automatically timed out. |
 | `disabled` | `disabled` | `boolean\|string` | `false` | Disables user interaction and programmatic verification while set. |
 
@@ -237,6 +238,20 @@ When `disabled` is present and not equal to `"false"`:
 ></ribaunt-widget>
 ```
 
+### Secondary Loader: `show-progress="false"`
+
+The primary spinner is a conic progress ring paired with a live percentage (`Solving... 42%`). For a quieter experience you can hide the completion rate entirely:
+
+```html
+<ribaunt-widget
+  challenge-endpoint="/api/challenge"
+  verify-endpoint="/api/verify"
+  show-progress="false"
+></ribaunt-widget>
+```
+
+With `show-progress="false"` the widget switches to the secondary design: a 12-bar pulse spinner inside the checkbox and a static `Loading...` label during fetching, solving, and verifying. The progress number is no longer rendered, but it is still reported in `state-change` event details so telemetry and analytics keep working.
+
 ## React: `RibauntWidget` Props and Callbacks
 
 When using the React wrapper (`ribaunt/widget-react`), all HTML attributes above are available as camelCase props. Additionally, you can use typed callback props:
@@ -248,6 +263,7 @@ When using the React wrapper (`ribaunt/widget-react`), all HTML attributes above
 | `autoVerify` | `boolean\|string` | (HTML: `auto-verify`) |
 | `showWarning` | `boolean\|string` | (HTML: `show-warning`) |
 | `warningMessage` | `string` | (HTML: `warning-message`) |
+| `showProgress` | `boolean\|string` | (HTML: `show-progress`) |
 | `solveTimeout` | `number\|string` | (HTML: `solve-timeout`) |
 | `disabled` | `boolean\|string` | (HTML: `disabled`) |
 | `onVerify` | `(detail) => void` | Fired when verification succeeds |
