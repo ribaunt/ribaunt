@@ -459,6 +459,97 @@ describe('RibauntWidget', () => {
     expect(captcha.style.getPropertyValue('--progress')).toBe('33.3%');
   });
 
+  it('swaps the percentage spinner for a plain bars loader when show-progress is false', async () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('challenge-endpoint', '/challenge');
+    widget.setAttribute('show-progress', 'false');
+
+    (global.fetch as Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ challenges: ['token-1'] }),
+    });
+    mockSolveChallenge.mockImplementation(async (_tokens: string[], onProgress?: (progress: number) => void) => {
+      onProgress?.(42);
+      return new Promise(() => {});
+    });
+
+    document.body.appendChild(widget);
+    (widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement).click();
+    await flushPromises();
+    await flushPromises();
+
+    const captcha = widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement;
+    const checkbox = widget.shadowRoot?.querySelector('.checkbox') as HTMLDivElement;
+    const sheet = widget.shadowRoot?.querySelector('style')?.textContent ?? '';
+    const barsBoxRule = sheet.match(/[^{]*\.checkbox\.bars[^{]*\{[^}]*\}/)?.[0] ?? '';
+
+    expect(captcha.getAttribute('data-state')).toBe('solving');
+    expect(checkbox.classList.contains('bars')).toBe(true);
+    expect(checkbox.querySelectorAll('.bar')).toHaveLength(12);
+    expect(barsBoxRule).toContain('border-radius: 50%');
+    expect(barsBoxRule).toContain('border: none');
+    expect(captcha.querySelector('p')?.textContent).toBe('Loading...');
+    expect(captcha.textContent).not.toContain('%');
+    expect(captcha.style.getPropertyValue('--progress')).toBe('');
+  });
+
+  it('renders the default conic spinner when show-progress is absent or true', async () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('challenge-endpoint', '/challenge');
+    widget.setAttribute('show-progress', 'true');
+
+    (global.fetch as Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ challenges: ['token-1'] }),
+    });
+    mockSolveChallenge.mockImplementation(async (_tokens: string[], onProgress?: (progress: number) => void) => {
+      onProgress?.(50);
+      return new Promise(() => {});
+    });
+
+    document.body.appendChild(widget);
+    (widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement).click();
+    await flushPromises();
+    await flushPromises();
+
+    const checkbox = widget.shadowRoot?.querySelector('.checkbox') as HTMLDivElement;
+    expect(widget.shadowRoot?.querySelector('.captcha')?.getAttribute('data-state')).toBe('solving');
+    expect(checkbox.classList.contains('bars')).toBe(false);
+    expect(checkbox.querySelectorAll('.bar')).toHaveLength(0);
+    const message = widget.shadowRoot?.querySelector('p')?.textContent;
+    expect(message).toMatch(/^Solving\.\.\. \d+(\.\d+)?%$/);
+    expect(message).not.toBe('Loading...');
+  });
+
+  it('still reports progress through state-change events in no-percent mode', async () => {
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('challenge-endpoint', '/challenge');
+    widget.setAttribute('show-progress', 'false');
+
+    const progresses: number[] = [];
+    widget.addEventListener('state-change', ((event: CustomEvent<{ progress: number }>) => {
+      progresses.push(event.detail.progress);
+    }) as EventListener);
+
+    (global.fetch as Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ challenges: ['token-1'] }),
+    });
+    mockSolveChallenge.mockImplementation(async (_tokens: string[], onProgress?: (progress: number) => void) => {
+      onProgress?.(42);
+      onProgress?.(100);
+      return [{ nonce: '1', hash: 'hash-1' }];
+    });
+
+    document.body.appendChild(widget);
+    (widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement).click();
+    await flushPromises();
+    await flushPromises();
+
+    expect(progresses).toContain(100);
+    expect(progresses.at(-1)).toBe(100);
+  });
+
   it('emits an error when verification endpoint rejects the solution', async () => {
     const widget = document.createElement('ribaunt-widget');
     widget.setAttribute('challenge-endpoint', '/challenge');

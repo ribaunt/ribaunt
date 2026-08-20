@@ -319,6 +319,7 @@ const solutions = solveChallenge(challenges, {
 | `calibrate` | `calibrate` | Benchmarks the browser and sends `{ calibration }` with POST challenge requests. |
 | `show-warning` | `showWarning` | Shows a warning banner. |
 | `warning-message` | `warningMessage` | Custom warning text. |
+| `show-progress` | `showProgress` | Set to `"false"` to swap the percentage ring for a plain bars spinner with a static `Loading...` label. |
 | `solve-timeout` | `solveTimeout` | Optional solve timeout in milliseconds. |
 | `disabled` | `disabled` | Blocks user interaction and automatic verification. |
 | | `fallback` | React-only. Custom loading element while widget dynamic import loads. Defaults to a built-in shimmer skeleton. |

@@ -9,6 +9,7 @@
  *   auto-verify="true"
  *   show-warning="true"
  *   warning-message="Custom warning message"
+ *   show-progress="false"
  * ></ribaunt-widget>
  * ```
  * 
@@ -98,6 +99,13 @@ const WIDGET_STYLES = `
     margin-top: var(--ribaunt-checkbox-margin, 2px);
     margin-bottom: var(--ribaunt-checkbox-margin, 2px);
     flex-shrink: 0;
+  }
+
+  /* Content group: spinner + label, side by side */
+  .captcha .content {
+    display: flex;
+    align-items: center;
+    gap: var(--ribaunt-gap, 15px);
   }
 
   /* Font Family */
@@ -225,9 +233,172 @@ const WIDGET_STYLES = `
     }
   }
 
+  /* Secondary "no percent" spinner: 12 fixed radial bars with a single smooth
+     opacity pulse (show-progress="false"). The container never rotates and
+     each bar carries one static transform; the only animation is a symmetric
+     opacity pulse shared by all bars via a per-bar delay.
+     Like the conic loader, the checkbox box morphs into a round spinner on
+     entering the loading states: the base .checkbox transition animates the
+     square -> circle (border-radius), border removal and transparency, so
+     both loaders transforms look identical. Reduced motion kills all shell
+     animation (transition: none) while the bars keep their static position.
+     The loader group (spinner + label) is left-aligned and shares a single
+     color: the bars draw with currentColor, which resolves to the same color
+     the "Loading..." text uses. The logo is absolutely positioned, so the
+     content group is the only in-flow flex child and sits flush at the left. */
+  .captcha[data-state=fetching] .content.bars,
+  .captcha[data-state=solving] .content.bars,
+  .captcha[data-state=verifying] .content.bars {
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .captcha[data-state=fetching] .content.bars .checkbox,
+  .captcha[data-state=solving] .content.bars .checkbox,
+  .captcha[data-state=verifying] .content.bars .checkbox {
+    margin: 0;
+  }
+
+  .captcha[data-state=fetching] .content.bars p,
+  .captcha[data-state=solving] .content.bars p,
+  .captcha[data-state=verifying] .content.bars p {
+    flex-shrink: 0;
+    line-height: 1.2;
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars,
+  .captcha[data-state=solving] .checkbox.bars,
+  .captcha[data-state=verifying] .checkbox.bars {
+    animation: none;
+    background: none;
+    border: none;
+    border-radius: 50%;
+    position: relative;
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars::after,
+  .captcha[data-state=solving] .checkbox.bars::after,
+  .captcha[data-state=verifying] .checkbox.bars::after {
+    display: none;
+  }
+
+  /* Bars pivot around the checkbox center: each bar's own center is placed at
+     the checkbox center (left/top 50% minus half the bar's size), so the static
+     rotate(angle) translate(146%) orbits every bar around the exact center. */
+  .captcha[data-state=fetching] .checkbox.bars .bar,
+  .captcha[data-state=solving] .checkbox.bars .bar,
+  .captcha[data-state=verifying] .checkbox.bars .bar {
+    animation: ribaunt-bars-pulse 1.2s ease-in-out infinite;
+    animation-delay: calc(var(--bar-index, 0) * -0.1s);
+    background: currentColor;
+    border-radius: 6px;
+    height: 8%;
+    left: 50%;
+    margin-left: -12%;
+    margin-top: -4%;
+    position: absolute;
+    top: 50%;
+    width: 24%;
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars .bar:nth-child(1),
+  .captcha[data-state=solving] .checkbox.bars .bar:nth-child(1),
+  .captcha[data-state=verifying] .checkbox.bars .bar:nth-child(1) {
+    --bar-index: 0;
+    transform: rotate(0.0001deg) translate(146%);
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars .bar:nth-child(2),
+  .captcha[data-state=solving] .checkbox.bars .bar:nth-child(2),
+  .captcha[data-state=verifying] .checkbox.bars .bar:nth-child(2) {
+    --bar-index: 1;
+    transform: rotate(30deg) translate(146%);
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars .bar:nth-child(3),
+  .captcha[data-state=solving] .checkbox.bars .bar:nth-child(3),
+  .captcha[data-state=verifying] .checkbox.bars .bar:nth-child(3) {
+    --bar-index: 2;
+    transform: rotate(60deg) translate(146%);
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars .bar:nth-child(4),
+  .captcha[data-state=solving] .checkbox.bars .bar:nth-child(4),
+  .captcha[data-state=verifying] .checkbox.bars .bar:nth-child(4) {
+    --bar-index: 3;
+    transform: rotate(90deg) translate(146%);
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars .bar:nth-child(5),
+  .captcha[data-state=solving] .checkbox.bars .bar:nth-child(5),
+  .captcha[data-state=verifying] .checkbox.bars .bar:nth-child(5) {
+    --bar-index: 4;
+    transform: rotate(120deg) translate(146%);
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars .bar:nth-child(6),
+  .captcha[data-state=solving] .checkbox.bars .bar:nth-child(6),
+  .captcha[data-state=verifying] .checkbox.bars .bar:nth-child(6) {
+    --bar-index: 5;
+    transform: rotate(150deg) translate(146%);
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars .bar:nth-child(7),
+  .captcha[data-state=solving] .checkbox.bars .bar:nth-child(7),
+  .captcha[data-state=verifying] .checkbox.bars .bar:nth-child(7) {
+    --bar-index: 6;
+    transform: rotate(180deg) translate(146%);
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars .bar:nth-child(8),
+  .captcha[data-state=solving] .checkbox.bars .bar:nth-child(8),
+  .captcha[data-state=verifying] .checkbox.bars .bar:nth-child(8) {
+    --bar-index: 7;
+    transform: rotate(210deg) translate(146%);
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars .bar:nth-child(9),
+  .captcha[data-state=solving] .checkbox.bars .bar:nth-child(9),
+  .captcha[data-state=verifying] .checkbox.bars .bar:nth-child(9) {
+    --bar-index: 8;
+    transform: rotate(240deg) translate(146%);
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars .bar:nth-child(10),
+  .captcha[data-state=solving] .checkbox.bars .bar:nth-child(10),
+  .captcha[data-state=verifying] .checkbox.bars .bar:nth-child(10) {
+    --bar-index: 9;
+    transform: rotate(270deg) translate(146%);
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars .bar:nth-child(11),
+  .captcha[data-state=solving] .checkbox.bars .bar:nth-child(11),
+  .captcha[data-state=verifying] .checkbox.bars .bar:nth-child(11) {
+    --bar-index: 10;
+    transform: rotate(300deg) translate(146%);
+  }
+
+  .captcha[data-state=fetching] .checkbox.bars .bar:nth-child(12),
+  .captcha[data-state=solving] .checkbox.bars .bar:nth-child(12),
+  .captcha[data-state=verifying] .checkbox.bars .bar:nth-child(12) {
+    --bar-index: 11;
+    transform: rotate(330deg) translate(146%);
+  }
+
+  @keyframes ribaunt-bars-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.15;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .captcha,
     .checkbox,
+    .bar,
     .warning,
     .logo {
       transition: none !important;
@@ -266,6 +437,8 @@ const RIBAUNT_LOGO = `
     <path fill-rule="evenodd" clip-rule="evenodd" d="M236.619 122.188L341.575 383.702H209.913L170.796 286.199L131.663 383.702H0L104.957 122.188H236.619Z" fill="currentColor"/>
   </svg>
 `;
+
+const BARS_MARKUP = '<div class="bar"></div>'.repeat(12);
 
 export type WidgetState = 'initial' | 'fetching' | 'solving' | 'verifying' | 'done' | 'error';
 export type WidgetErrorCode =
@@ -360,6 +533,7 @@ export class RibauntWidget extends HTMLElement {
       'worker-mode',
       'challenge-method',
       'calibrate',
+      'show-progress',
       'disabled',
     ];
   }
@@ -406,14 +580,17 @@ export class RibauntWidget extends HTMLElement {
     const showWarning = this.hasAttribute('show-warning') && this.getAttribute('show-warning') !== 'false';
     const warningMessage = this.getAttribute('warning-message') || 'Enable WASM for significantly faster solving';
     const disabled = this.isDisabled();
+    const hideProgress = this.isProgressHidden();
 
     this.shadow.innerHTML = `
       <style>${WIDGET_STYLES}</style>
       <div>
         ${showWarning ? '<div class="warning"></div>' : ''}
         <div class="captcha" data-state="${this.state}" role="button" tabindex="${disabled ? '-1' : '0'}" aria-disabled="${disabled}" aria-label="${this.getMessage()}" aria-busy="${this.isBusy()}">
-          <div class="checkbox"></div>
-          <p role="status" aria-live="polite">${this.getMessage()}</p>
+          <div class="content${hideProgress ? ' bars' : ''}">
+            <div class="checkbox${hideProgress ? ' bars' : ''}">${hideProgress ? BARS_MARKUP : ''}</div>
+            <p role="status" aria-live="polite">${this.getMessage()}</p>
+          </div>
           <a class="logo" href="https://ribaunt.com" target="_blank" rel="noopener noreferrer" aria-label="Powered by Ribaunt">
             ${RIBAUNT_LOGO}
           </a>
@@ -480,6 +657,10 @@ export class RibauntWidget extends HTMLElement {
   }
 
   private getMessage(): string {
+    if (this.isProgressHidden() && this.isBusy()) {
+      return 'Loading...';
+    }
+
     switch (this.state) {
       case 'initial':
         return "I'm a human";
@@ -494,6 +675,15 @@ export class RibauntWidget extends HTMLElement {
       case 'error':
         return this.timeoutError ? 'Timed out.' : 'Error. Try again.';
     }
+  }
+
+  /**
+   * When `show-progress="false"`, the primary progress UI (conic spinner +
+   * percentage) is replaced by the secondary plain bars spinner and a static
+   * "Loading..." label. Progress is still tracked and reported via events.
+   */
+  private isProgressHidden(): boolean {
+    return this.hasAttribute('show-progress') && this.getAttribute('show-progress') === 'false';
   }
 
   private isBusy(): boolean {
@@ -590,6 +780,11 @@ export class RibauntWidget extends HTMLElement {
 
     const start = this.progress;
     this.progress = target;
+
+    // Progress stays internal (events) in the no-percent mode; nothing to paint.
+    if (this.isProgressHidden()) {
+      return;
+    }
 
     if (this.state !== 'solving') {
       if (this.captchaElement) {
@@ -824,6 +1019,7 @@ declare global {
         'worker-mode'?: WorkerMode;
         'challenge-method'?: 'GET' | 'POST';
         calibrate?: string | boolean;
+        'show-progress'?: string | boolean;
         disabled?: string | boolean;
       };
     }

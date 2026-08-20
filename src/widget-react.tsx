@@ -20,6 +20,7 @@ export interface RibauntWidgetProps extends Omit<React.HTMLAttributes<RibauntWid
   workerMode?: WorkerMode;
   challengeMethod?: 'GET' | 'POST';
   calibrate?: boolean | string;
+  showProgress?: boolean | string;
   disabled?: boolean | string;
   fallback?: React.ReactNode;
   onVerify?: (detail: WidgetVerifyDetail) => void;
@@ -60,6 +61,7 @@ function syncWidgetProps(
     workerMode,
     challengeMethod,
     calibrate,
+    showProgress,
     disabled,
     autoVerify,
   }: {
@@ -72,6 +74,7 @@ function syncWidgetProps(
     workerMode: WorkerMode | undefined;
     challengeMethod: 'GET' | 'POST' | undefined;
     calibrate: boolean | string | undefined;
+    showProgress: boolean | string | undefined;
     disabled: boolean | string | undefined;
   }
 ) {
@@ -84,6 +87,7 @@ function syncWidgetProps(
   syncAttribute(element, 'worker-mode', workerMode);
   syncAttribute(element, 'challenge-method', challengeMethod);
   syncAttribute(element, 'calibrate', calibrate);
+  syncAttribute(element, 'show-progress', showProgress);
   syncAttribute(element, 'disabled', disabled);
 }
 
@@ -102,6 +106,7 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       workerMode,
       challengeMethod,
       calibrate,
+      showProgress,
       disabled,
       autoVerify,
       fallback,
@@ -205,6 +210,7 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
         workerMode,
         challengeMethod,
         calibrate,
+        showProgress,
         disabled,
       });
 
@@ -256,6 +262,7 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
         workerMode,
         challengeMethod,
         calibrate,
+        showProgress,
         disabled,
       });
     }, [
@@ -268,6 +275,7 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       workerMode,
       challengeMethod,
       calibrate,
+      showProgress,
       disabled,
     ]);
 
