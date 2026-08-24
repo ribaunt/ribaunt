@@ -102,10 +102,34 @@ describe('RibauntWidget React wrapper', () => {
     expect(widget.getAttribute('verify-endpoint')).toBe('/verify-b');
     expect(widget.getAttribute('auto-verify')).toBeNull();
     expect(widget.getAttribute('show-warning')).toBeNull();
-    expect(widget.getAttribute('show-progress')).toBeNull();
+    // show-progress is tri-state: false must be set as "false", not removed,
+    // because the widget only hides progress when the attribute equals "false".
+    expect(widget.getAttribute('show-progress')).toBe('false');
     expect(widget.getAttribute('warning-message')).toBe('Second warning');
     expect(widget.getAttribute('solve-timeout')).toBeNull();
     expect(widget.getAttribute('disabled')).toBeNull();
+
+    const checkbox = widget.shadowRoot?.querySelector('.checkbox') as HTMLDivElement;
+    expect(checkbox.classList.contains('bars')).toBe(true);
+
+    await act(async () => {
+      root.render(
+        <RibauntWidget
+          challengeEndpoint="/challenge-c"
+          verifyEndpoint="/verify-c"
+        />
+      );
+      await flushPromises();
+    });
+
+    // Omitting showProgress removes the attribute, restoring the default spinner.
+    expect(widget.getAttribute('challenge-endpoint')).toBe('/challenge-c');
+    expect(widget.getAttribute('verify-endpoint')).toBe('/verify-c');
+    expect(widget.getAttribute('show-progress')).toBeNull();
+    expect(widget.getAttribute('disabled')).toBeNull();
+
+    const restoredCheckbox = widget.shadowRoot?.querySelector('.checkbox') as HTMLDivElement;
+    expect(restoredCheckbox.classList.contains('bars')).toBe(false);
   });
 
   it('forwards remaining HTML props as properties or attributes', async () => {

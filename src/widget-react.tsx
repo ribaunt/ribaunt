@@ -87,7 +87,14 @@ function syncWidgetProps(
   syncAttribute(element, 'worker-mode', workerMode);
   syncAttribute(element, 'challenge-method', challengeMethod);
   syncAttribute(element, 'calibrate', calibrate);
-  syncAttribute(element, 'show-progress', showProgress);
+  // showProgress is tri-state, not presence-based: the widget hides progress
+  // only when the attribute is present with literal value "false", so false
+  // must be passed through verbatim instead of removing the attribute.
+  if (showProgress === undefined) {
+    element.removeAttribute('show-progress');
+  } else {
+    element.setAttribute('show-progress', String(showProgress));
+  }
   syncAttribute(element, 'disabled', disabled);
 }
 
