@@ -48,7 +48,7 @@
   "type": "module",
   "packageManager": "pnpm@11.13.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "node scripts/clean.mjs && tsc && tsc --project tsconfig.cjs.json && node scripts/prepare-cjs.mjs",
