@@ -22,10 +22,10 @@ Ribaunt now includes test coverage for the main integration layers:
 ## Run the Full Test Suite
 
 ```bash
-npm test -- --runInBand
+pnpm test
 ```
 
-`--runInBand` is useful here because the challenge-solving tests are CPU-heavy and deterministic timing is easier when they do not compete across workers.
+The challenge-solving tests are CPU-heavy; deterministic timing is easier when they do not compete across workers, which is the default for a single-threaded local run. Use `pnpm vitest run --pool=forks --poolOptions.forks.singleFork` if you need strict serial execution.
 
 ## Main Test Files
 
@@ -34,18 +34,20 @@ npm test -- --runInBand
 | `tests/challenge.test.ts` | Server-side challenge flow, malformed tokens, async verification, replay modes, expiry, invalid config, auto hardness (`selectWorkload`), calibration semantics, risk scores, and `calibrateNode` |
 | `tests/solver.test.ts` | Browser solver token decoding, solving, progress reporting, invalid-token handling, cancellation, missing Web Crypto behavior, and `calibrateBrowser` / `calibrateClient` |
 | `tests/widget.test.ts` | Widget fetch/solve/verify flow, auto-verify behavior, solve-timeout behavior, warning visibility animation, emitted events, disabled behavior, and listener lifecycle |
-| `tests/widget-react.test.tsx` | React wrapper prop syncing, including `autoVerify`, callback/event forwarding, and imperative ref methods |
-| `tests/package-smoke.test.ts` | Built ESM/CJS entry points, browser bundle loading, and package export targets |
+| `tests/widget-react.test.tsx` | React wrapper prop syncing, including `autoVerify`, callback/event forwarding, imperative ref methods, live HTML-prop updates, and native handler binding |
+| `tests/worker-client.test.ts` | Worker-mode solving, cooperative cancellation, fallbacks, and abort handling |
+| `tests/redis.test.ts` | Atomic Redis replay-store consumption (integration tests run when `RIBAUNT_TEST_REDIS_URL` is set) and store adapter signatures |
+| `tests/package-smoke.test.ts` | Built ESM/CJS entry points, browser bundle loading, package export targets, and pinned CI actions |
 
 ## Notes
 
 - Widget and React tests run in `jsdom`.
-- The test config maps `.js` import specifiers back to TypeScript source files so source-level tests can exercise the same modules used in builds.
+- Tests import the TypeScript sources directly (for example `../src/widget`); the built artifacts are exercised separately by the packaging smoke tests.
 - The solver suite covers the secure-context dependency by asserting the explicit Web Crypto error path.
-- Packaging smoke tests run `npm run build` and validate the emitted entry points from `dist/`.
-- The CommonJS build now uses `dist/cjs/package.json` with `"type": "commonjs"` instead of renaming output files to `.cjs`.
+- `pnpm test` and `pnpm run test:coverage` build the package first. The packaging smoke tests validate the emitted entry points from `dist/`; they never build anything themselves, so running vitest directly validates whatever is currently in `dist/`.
+- The CommonJS build uses `dist/cjs/package.json` with `"type": "commonjs"` instead of renaming output files to `.cjs`.
 - Build validation is still available directly:
 
 ```bash
-npm run build
+pnpm run build
 ```

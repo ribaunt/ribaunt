@@ -1,6 +1,8 @@
 /** @vitest-environment jsdom */
 
 import { vi } from 'vitest';
+import { webcrypto } from 'node:crypto';
+import { TextEncoder } from 'node:util';
 import { createChallenge } from '../src/index';
 import { calibrateBrowser, calibrateClient, solveChallenge, solveSingleChallenge } from '../src/solver';
 
@@ -8,11 +10,11 @@ describe('browser solver', () => {
   beforeAll(() => {
     Object.defineProperty(globalThis, 'crypto', {
       configurable: true,
-      value: require('node:crypto').webcrypto,
+      value: webcrypto,
     });
     Object.defineProperty(globalThis, 'TextEncoder', {
       configurable: true,
-      value: require('node:util').TextEncoder,
+      value: TextEncoder,
     });
     Object.defineProperty(globalThis, 'atob', {
       configurable: true,

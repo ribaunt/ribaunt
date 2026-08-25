@@ -151,6 +151,8 @@ const challenges = await createChallenge(5, 4, 120);
 
 Validate user- or config-controlled values before passing them to `createChallenge()`. Invalid values throw.
 
+> **API note:** the options object form defaults to a single challenge (`amount: 1`) unless you pass `amount`; only the positional form above defaults to `4`.
+
 ### `createChallenge({ difficulty: "auto", ... })`
 
 Creates adaptive challenge tokens from a server-bounded calibration hint. Calibration is untrusted and raise-only: it can increase work for fast clients, but it never lowers the server baseline.
@@ -204,7 +206,7 @@ const workload = selectWorkload({
   minDifficulty: 3,
   maxDifficulty: 6,
 });
-// { difficulty: 5, amount: 4, estimatedAttempts: 1256 }
+// { difficulty: 3, amount: 5, estimatedAttempts: 20480 }
 ```
 
 ### `verifySolution(tokens, solutions, options?)`
@@ -245,13 +247,15 @@ const rateLimiter = {
   check: async (key?: string) => (await redisBucket.hit(key ?? 'unknown')) < 10,
 };
 
-// Challenge endpoint: key on the client IP so each IP is limited independently.
+// Challenge endpoint: key the limiter on the client IP by closing over the
+// request instead of passing `context`. Passing `context: req.ip` here would
+// also cryptographically bind each challenge to that IP, forcing the verify
+// call to pass the exact same `context` (see `verifySolution` below).
 app.get('/api/captcha/challenge', async (req, res) => {
   try {
     const challenges = await createChallenge({
       difficulty: 5,
       amount: 4,
-      context: req.ip,
       rateLimiter,
     });
     res.json({ challenges });
@@ -263,6 +267,8 @@ app.get('/api/captcha/challenge', async (req, res) => {
   }
 });
 ```
+
+> **Context binding:** if you *do* pass `context` to `createChallenge()`, every challenge token is bound to that context via an HMAC digest. You must then pass the identical `context` to `verifySolution()` or verification fails with `context-mismatch`. Use `context` for binding a challenge to a specific action (e.g. one signup attempt), not for rate limiting.
 
 ### `onEvent` telemetry hook
 
@@ -281,7 +287,7 @@ await createChallenge({ difficulty: 5, amount: 4, onEvent });
 const result = await verifySolution(tokens, solutions, { onEvent });
 ```
 
-`verify-failure` events carry the same `reason` values as `VerifySolutionResult` (`invalid-token`, `expired-token`, `invalid-solution`, `context-mismatch`, `replay-detected`, `configuration-error`). Add aggregation over Windows, StatsD, or Prometheus yourself — Ribaunt only emits raw events.
+`verify-failure` events carry the same `reason` values as `VerifySolutionResult` (`invalid-token`, `expired-token`, `invalid-solution`, `context-mismatch`, `replay-detected`, `replay-store-unavailable`, `configuration-error`). Add aggregation over Windows, StatsD, or Prometheus yourself — Ribaunt only emits raw events.
 
 ### `solveChallenge(token, options?)`
 
@@ -306,6 +312,7 @@ const solutions = solveChallenge(challenges, {
   show-warning="false"
   warning-message="Verification may take longer on this device."
   solve-timeout="15000"
+  worker-mode="preferred"
   disabled="false"
 ></ribaunt-widget>
 ```
@@ -320,7 +327,8 @@ const solutions = solveChallenge(challenges, {
 | `show-warning` | `showWarning` | Shows a warning banner. |
 | `warning-message` | `warningMessage` | Custom warning text. |
 | `show-progress` | `showProgress` | Set to `"false"` to swap the percentage ring for a plain bars spinner with a static `Loading...` label. |
-| `solve-timeout` | `solveTimeout` | Optional solve timeout in milliseconds. |
+| `solve-timeout` | `solveTimeout` | Optional timeout in milliseconds for the whole verification attempt (fetching, solving, and verifying). |
+| `worker-mode` | `workerMode` | Web Worker solving: `preferred` (default; falls back to the main thread), `required` (fail if unavailable), or `disabled`. |
 | `disabled` | `disabled` | Blocks user interaction and automatic verification. |
 | | `fallback` | React-only. Custom loading element while widget dynamic import loads. Defaults to a built-in shimmer skeleton. |
 
@@ -371,9 +379,10 @@ You can also ask documentation-aware tools to use the Context7 library ID:
 ## Development
 
 ```bash
-npm install
-npm test
-npm run build
+corepack enable
+pnpm install
+pnpm test
+pnpm run build
 ```
 
 ## License

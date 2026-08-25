@@ -151,6 +151,66 @@ describe('RibauntWidget React wrapper', () => {
     expect(widget.getAttribute('data-custom')).toBe('custom-value');
   });
 
+  it('updates standard HTML props live across renders without remounting', async () => {
+    await act(async () => {
+      root.render(<RibauntWidget title="First" data-track="one" />);
+      await flushPromises();
+    });
+
+    await waitFor(() => Boolean(container.querySelector('ribaunt-widget')));
+    const widget = container.querySelector('ribaunt-widget') as HTMLElement;
+    expect(widget.title).toBe('First');
+
+    await act(async () => {
+      root.render(<RibauntWidget title="Second" data-track="two" />);
+      await flushPromises();
+    });
+
+    expect(widget.title).toBe('Second');
+    expect(widget.getAttribute('data-track')).toBe('two');
+
+    await act(async () => {
+      root.render(<RibauntWidget />);
+      await flushPromises();
+    });
+
+    expect(widget.getAttribute('data-track')).toBeNull();
+  });
+
+  it('binds handler props as native event listeners', async () => {
+    const onClick = vi.fn();
+    const onKey = vi.fn();
+
+    await act(async () => {
+      root.render(<RibauntWidget onClick={onClick} onKeyDown={onKey} />);
+      await flushPromises();
+    });
+
+    await waitFor(() => Boolean(container.querySelector('ribaunt-widget')));
+    const widget = container.querySelector('ribaunt-widget') as HTMLElement;
+
+    await act(async () => {
+      widget.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      widget.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+      await flushPromises();
+    });
+
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(onKey).toHaveBeenCalledTimes(1);
+
+    // Re-rendering with fewer handlers must not duplicate dispatches.
+    await act(async () => {
+      root.render(<RibauntWidget onClick={onClick} />);
+      await flushPromises();
+    });
+
+    widget.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    widget.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+
+    expect(onClick).toHaveBeenCalledTimes(2);
+    expect(onKey).toHaveBeenCalledTimes(1);
+  });
+
   it('forwards widget events to React callbacks', async () => {
     const onVerify = vi.fn();
     const onError = vi.fn();

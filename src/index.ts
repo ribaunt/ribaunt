@@ -93,6 +93,7 @@ export type VerifyFailureReason =
   | 'invalid-solution'
   | 'context-mismatch'
   | 'replay-detected'
+  | 'replay-store-unavailable'
   | 'configuration-error';
 
 export type VerifyWarningReason = VerifyFailureReason;
@@ -282,19 +283,15 @@ function hashContext(context: string, jti: string): string {
     .digest('hex');
 }
 
-let cachedSecret: string | undefined;
 function getSecret(): string {
   const secret = process.env.RIBAUNT_SECRET;
   if (!secret) {
-    cachedSecret = undefined;
     throw new Error('RIBAUNT_SECRET environment variable is not set!');
   }
   if (Buffer.byteLength(secret, 'utf8') < 32) {
-    cachedSecret = undefined;
     throw new Error('RIBAUNT_SECRET must be at least 32 bytes');
   }
-  if (cachedSecret !== secret) cachedSecret = secret;
-  return cachedSecret;
+  return secret;
 }
 
 function createSingleChallenge(
@@ -547,17 +544,26 @@ export async function verifySolution(
     if (replayStore && jtis.length > 0) {
       const expiresAt = Math.max(...validated.map((payload) => payload.expires));
       let consumed: boolean;
-      if (jtis.length > 1) {
-        if (!replayStore.consumeMany) {
-          return warn(
-            'configuration-error',
-            'A replayStore with consumeMany is required for atomic batch verification',
-            options
-          );
+      try {
+        if (jtis.length > 1) {
+          if (!replayStore.consumeMany) {
+            return warn(
+              'configuration-error',
+              'A replayStore with consumeMany is required for atomic batch verification',
+              options
+            );
+          }
+          consumed = await replayStore.consumeMany(jtis, expiresAt);
+        } else {
+          consumed = await replayStore.consume(jtis[0]!, expiresAt);
         }
-        consumed = await replayStore.consumeMany(jtis, expiresAt);
-      } else {
-        consumed = await replayStore.consume(jtis[0]!, expiresAt);
+      } catch (error) {
+        return warn(
+          'replay-store-unavailable',
+          'verifySolution failed because the replay store could not be reached',
+          options,
+          error
+        );
       }
       if (!consumed) return warn('replay-detected', 'verifySolution rejected a replayed token', options);
     }
