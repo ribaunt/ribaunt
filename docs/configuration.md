@@ -91,7 +91,6 @@ The adaptive engine is also exposed directly for advanced use cases, such as pre
 import { selectWorkload } from 'ribaunt';
 
 const workload = selectWorkload({
-  difficulty: 'auto',
   calibration: { iterations: 128, durationMs: 50 },
   targetDurationMs: 750,
   minDifficulty: 3,
@@ -99,7 +98,7 @@ const workload = selectWorkload({
   minAmount: 1,
   maxAmount: 8,
 });
-// { difficulty: 5, amount: 4, estimatedAttempts: ... }
+// { difficulty: 3, amount: 5, estimatedAttempts: 20480 }
 ```
 
 Returns a `Workload` object with `{ difficulty, amount, estimatedAttempts }`. This is the same function `createChallenge()` calls internally when `difficulty` is `"auto"`.
@@ -153,7 +152,8 @@ const result = await verifySolution(tokens, solutions, {
 await verifySolution(tokens, solutions, {
   debug: false,
   onWarning: (warning) => {
-    // warning.reason: invalid-token | expired-token | invalid-solution | replay-detected | configuration-error
+    // warning.reason: invalid-token | expired-token | invalid-solution | context-mismatch
+    //                 | replay-detected | replay-store-unavailable | configuration-error
     console.log('captcha-warning', warning.reason, warning.message);
   },
 });
@@ -198,7 +198,8 @@ Plain LAN URLs such as `http://192.168.x.x` may not expose `crypto.subtle`, espe
 | `show-warning` | `showWarning` | `boolean\|string` | `false` | Shows a red warning banner above the widget. Often used to alert users if WebAssembly is missing for future fast-solvers. |
 | `warning-message` | `warningMessage` | `string` | `"Enable WASM..."` | Custom message text for the warning banner. |
 | `show-progress` | `showProgress` | `boolean\|string` | `true` | Set to `"false"` to switch to the secondary loader: a plain bars spinner with a static `Loading...` label instead of the conic progress ring and percentage counter. Progress is still tracked and reported through events. |
-| `solve-timeout` | `solveTimeout` | `number\|string` | `undefined` | Optional timeout in milliseconds for solving. If omitted, solving is not automatically timed out. |
+| `solve-timeout` | `solveTimeout` | `number\|string` | `undefined` | Optional timeout in milliseconds for the whole verification attempt — fetching, solving, and verifying. If omitted, the attempt is not automatically timed out. |
+| `worker-mode` | `workerMode` | `'preferred'\|'required'\|'disabled'` | `'preferred'` | Controls Web Worker solving. `preferred` falls back to main-thread solving when workers are unavailable; `required` fails with `worker-unavailable`; `disabled` always solves on the main thread. Unknown values fall back to `preferred` with a console warning. |
 | `disabled` | `disabled` | `boolean\|string` | `false` | Disables user interaction and programmatic verification while set. |
 
 ### Challenge Endpoint Response Shapes

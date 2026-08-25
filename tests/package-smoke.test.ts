@@ -1,27 +1,30 @@
 /** @vitest-environment jsdom */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 const rootDir = resolve(__dirname, '..');
 
-let built = false;
-
-function ensureBuild() {
-  if (built) return;
-
-  execFileSync('npm', ['run', 'build'], {
-    cwd: rootDir,
-    stdio: 'pipe',
-  });
-
-  built = true;
+/**
+ * The smoke tests validate built artifacts but never build anything
+ * themselves: spawning the package manager or tsc from inside a test worker
+ * has deadlocked under vitest's fork pool. `pnpm test` and CI run
+ * `pnpm run build` first; these tests fail fast with instructions if dist/
+ * is missing.
+ */
+function requireBuiltDist() {
+  const entry = resolve(rootDir, 'dist', 'index.js');
+  if (!existsSync(entry)) {
+    throw new Error(
+      'dist/index.js not found. Run `pnpm run build` (or `pnpm test`) before the smoke tests.'
+    );
+  }
 }
 
 describe('package smoke tests', () => {
   beforeAll(() => {
-    ensureBuild();
-  }, 60_000);
+    requireBuiltDist();
+  });
 
   it('exports working ESM and CJS server entry points', async () => {
     const esmOutput = execFileSync(
@@ -118,6 +121,18 @@ describe('package smoke tests', () => {
       widgetRegistered: true,
       widgetReact: 'object',
     });
+  });
+
+  it('re-exports widget types from the browser entry declarations', () => {
+    requireBuiltDist();
+
+    const widgetDts = readFileSync(resolve(rootDir, 'dist/widget-browser.d.ts'), 'utf8');
+
+    expect(widgetDts).toContain('RibauntWidgetElement');
+    expect(widgetDts).toContain('WidgetState');
+    expect(widgetDts).toContain('WidgetError');
+    expect(widgetDts).toContain('calibrateBrowser');
+    expect(widgetDts).toContain('calibrateClient');
   });
 
   it('points package exports at the built entry files', () => {

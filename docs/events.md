@@ -2,7 +2,7 @@
 
 The Ribaunt CAPTCHA widget emits three standard DOM events (`CustomEvent`) that notify you of the lifecycle and results.
 It also emits an initial `state-change` event immediately after the widget mounts with one of these states:
-`initial`, `verifying`, `done`, `error`.
+`initial`, `fetching`, `solving`, `verifying`, `done`, `error`.
 
 ## 1. `verify`
 Dispatched when the solver successfully solves all challenges and the server endpoint verifies it (if `verify-endpoint` is specified). 
@@ -28,13 +28,13 @@ The `code` field provides a machine-readable error classification:
 
 | Code | Meaning |
 |---|---|
-| `timeout` | Solving exceeded the configured `solve-timeout`. |
+| `timeout` | The attempt exceeded the configured `solve-timeout` (covers fetching, solving, and verifying). |
 | `aborted` | Solving was cancelled (e.g. widget reset). |
 | `challenge-fetch-failed` | Challenge endpoint request failed. |
 | `invalid-challenge` | Challenge response had an unexpected shape. |
 | `solve-failed` | Solving produced no valid nonce. |
 | `verification-failed` | Server verify endpoint rejected the solution. |
-| `worker-unavailable` | Web Worker solver is not available. |
+| `worker-unavailable` | Web Worker solver is not available (and `worker-mode="required"`). |
 | `unknown` | An unclassified error occurred. |
 
 ```javascript
@@ -60,8 +60,14 @@ widget.addEventListener('state-change', (e) => {
     case 'initial':
       console.log('Ready to solve');
       break;
-    case 'verifying':
+    case 'fetching':
+      console.log('Fetching challenge...');
+      break;
+    case 'solving':
       console.log(`Solving PoW... ${progress}%`);
+      break;
+    case 'verifying':
+      console.log('Verifying with server...');
       break;
     case 'done':
       console.log('Done!');
@@ -93,4 +99,4 @@ If you use the React wrapper (`ribaunt/widget-react`), you get built-in strongly
 
 - **`onEvent`**: Fires for all events with the event type (`'verify'`, `'error'`, `'state-change'`, or `'ready'`) and its detail. This is a catch-all handler that can be used instead of individual callbacks.
 
-The React wrapper also syncs key widget props after mount, including `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `challengeMethod`, `calibrate`, `showWarning`, `warningMessage`, `solveTimeout`, and `disabled`.
+The React wrapper also syncs all widget props after mount, including `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `challengeMethod`, `calibrate`, `showWarning`, `warningMessage`, `solveTimeout`, `showProgress`, `workerMode`, and `disabled`.

@@ -208,7 +208,33 @@ describe('RibauntWidget', () => {
     await flushPromises();
 
     expect(errorHandler).toHaveBeenCalledTimes(1);
+    const event = errorHandler.mock.calls[0]?.[0] as CustomEvent<{ code: string }>;
+    expect(event.detail.code).toBe('challenge-fetch-failed');
     expect(widget.shadowRoot?.querySelector('.captcha')?.getAttribute('data-state')).toBe('error');
+  });
+
+  it('warns once about unknown worker-mode values but keeps solving', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const widget = document.createElement('ribaunt-widget');
+    widget.setAttribute('challenge-endpoint', '/challenge');
+    widget.setAttribute('worker-mode', 'requried');
+
+    (global.fetch as Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ challenges: ['token-1'] }),
+    });
+    mockSolveChallenge.mockResolvedValue([{ nonce: '1', hash: 'hash-1' }]);
+
+    document.body.appendChild(widget);
+    (widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement).click();
+    await flushPromises();
+    await flushPromises();
+
+    expect(widget.shadowRoot?.querySelector('.captcha')?.getAttribute('data-state')).toBe('done');
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('worker-mode'));
+
+    warnSpy.mockRestore();
   });
 
   it('accepts challenge responses shaped as { tokens: string[] }', async () => {
@@ -406,11 +432,22 @@ describe('RibauntWidget', () => {
     document.body.appendChild(widget);
     const captcha = widget.shadowRoot?.querySelector('.captcha') as HTMLDivElement;
 
-    captcha.dispatchEvent(new KeyboardEvent('keypress', { key: 'Escape', bubbles: true }));
+    captcha.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await flushPromises();
     expect(global.fetch).not.toHaveBeenCalled();
 
-    captcha.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', bubbles: true, cancelable: true }));
+    captcha.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await flushPromises();
+    await flushPromises();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    const secondWidget = document.createElement('ribaunt-widget');
+    secondWidget.setAttribute('challenge-endpoint', '/challenge');
+    (global.fetch as Mock).mockClear();
+    document.body.appendChild(secondWidget);
+    const secondCaptcha = secondWidget.shadowRoot?.querySelector('.captcha') as HTMLDivElement;
+
+    secondCaptcha.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }));
     await flushPromises();
     await flushPromises();
     expect(global.fetch).toHaveBeenCalledTimes(1);

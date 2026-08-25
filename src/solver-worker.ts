@@ -24,7 +24,7 @@ workerScope.addEventListener('message', (event: MessageEvent<WorkerRequest>) => 
     if (controller) {
       controller.abort();
       activeControllers.delete(request.id);
-      workerScope.postMessage({ type: 'cancelled', id: request.id });
+      workerScope.postMessage({ type: 'cancelled', id: request.id } satisfies WorkerResponse);
       workerScope.close();
     }
     return;
@@ -39,7 +39,11 @@ workerScope.addEventListener('message', (event: MessageEvent<WorkerRequest>) => 
     request.tokens,
     (progress) => {
       if (!controller.signal.aborted) {
-        workerScope.postMessage({ type: 'progress', id: request.id, progress });
+        workerScope.postMessage({
+          type: 'progress',
+          id: request.id,
+          progress,
+        } satisfies WorkerResponse);
       }
     },
     controller.signal
@@ -47,7 +51,11 @@ workerScope.addEventListener('message', (event: MessageEvent<WorkerRequest>) => 
     (solutions) => {
       activeControllers.delete(request.id);
       if (controller.signal.aborted) return;
-      workerScope.postMessage({ type: 'result', id: request.id, solutions });
+      workerScope.postMessage({
+        type: 'result',
+        id: request.id,
+        solutions,
+      } satisfies WorkerResponse);
     },
     (error: unknown) => {
       activeControllers.delete(request.id);
@@ -56,7 +64,7 @@ workerScope.addEventListener('message', (event: MessageEvent<WorkerRequest>) => 
         type: 'error',
         id: request.id,
         error: error instanceof Error ? error.message : String(error),
-      });
+      } satisfies WorkerResponse);
     }
   );
 });

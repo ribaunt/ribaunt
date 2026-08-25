@@ -10,6 +10,14 @@ import type {
 } from './widget.js';
 import type { WorkerMode } from './worker-client.js';
 
+export type {
+  RibauntWidgetElement,
+  WidgetErrorDetail,
+  WidgetState,
+  WidgetStateDetail,
+  WidgetVerifyDetail,
+} from './widget.js';
+
 export interface RibauntWidgetProps extends Omit<React.HTMLAttributes<RibauntWidgetElement>, 'onError' | 'onLoad'> {
   challengeEndpoint?: string;
   verifyEndpoint?: string;
@@ -50,6 +58,52 @@ function syncAttribute(
   element.setAttribute(name, typeof value === 'boolean' ? 'true' : String(value));
 }
 
+const HANDLER_PROP_PATTERN = /^on[A-Z]/;
+
+function toDomEventType(key: string): string {
+  return key.slice(2).toLowerCase();
+}
+
+/**
+ * Applies non-widget HTML props (title, className, data-*, ...) to the
+ * custom element as attributes, and removes attributes for props that are
+ * no longer present. Handler props (onClick, ...) and non-serializable
+ * values (functions, objects) are ignored here; handlers are bound as real
+ * event listeners because assigning `element.onClick` does nothing.
+ */
+const appliedPropsCache = new WeakMap<RibauntWidgetElement, Set<string>>();
+
+function applyStandardProps(
+  element: RibauntWidgetElement,
+  props: Record<string, unknown>
+) {
+  const applied = new Set<string>();
+
+  Object.entries(props).forEach(([key, value]) => {
+    if (
+      key === 'children'
+      || value === undefined
+      || value === null
+      || typeof value === 'function'
+      || typeof value === 'object'
+      || HANDLER_PROP_PATTERN.test(key)
+    ) {
+      return;
+    }
+
+    element.setAttribute(key, value === true ? '' : String(value));
+    applied.add(key);
+  });
+
+  const previous = appliedPropsCache.get(element);
+  if (previous) {
+    for (const key of previous) {
+      if (!applied.has(key)) element.removeAttribute(key);
+    }
+  }
+  appliedPropsCache.set(element, applied);
+}
+
 function syncWidgetProps(
   element: RibauntWidgetElement,
   {
@@ -87,7 +141,14 @@ function syncWidgetProps(
   syncAttribute(element, 'worker-mode', workerMode);
   syncAttribute(element, 'challenge-method', challengeMethod);
   syncAttribute(element, 'calibrate', calibrate);
-  syncAttribute(element, 'show-progress', showProgress);
+  // showProgress is tri-state, not presence-based: the widget hides progress
+  // only when the attribute is present with literal value "false", so false
+  // must be passed through verbatim instead of removing the attribute.
+  if (showProgress === undefined) {
+    element.removeAttribute('show-progress');
+  } else {
+    element.setAttribute('show-progress', String(showProgress));
+  }
   syncAttribute(element, 'disabled', disabled);
 }
 
@@ -131,8 +192,30 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       onLoad,
       onEvent,
     });
+    const handlersRef = useRef<Map<string, Array<(event: Event) => void>>>(new Map());
+    const boundEventTypesRef = useRef<Set<string>>(new Set());
+    const nativeDispatcherRef = useRef<(event: Event) => void>((event) => {
+      for (const handler of handlersRef.current.get(event.type) ?? []) {
+        handler(event);
+      }
+    });
     const hasStateEventRef = useRef(false);
     const hasReadyRef = useRef(false);
+
+    const standardProps: Record<string, unknown> = {};
+    const nextHandlers = new Map<string, Array<(event: Event) => void>>();
+    Object.entries(props as Record<string, unknown>).forEach(([key, value]) => {
+      if (value === undefined) return;
+      if (HANDLER_PROP_PATTERN.test(key) && typeof value === 'function') {
+        const eventType = toDomEventType(key);
+        const listeners = nextHandlers.get(eventType) ?? [];
+        listeners.push(value as (event: Event) => void);
+        nextHandlers.set(eventType, listeners);
+        return;
+      }
+      standardProps[key] = value;
+    });
+    handlersRef.current = nextHandlers;
 
     useImperativeHandle(ref, () => ({
       reset: () => widgetRef.current?.reset?.(),
@@ -188,18 +271,6 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       widget.addEventListener('error', handleError);
       widget.addEventListener('state-change', handleStateChange);
 
-      // Apply any remaining standard HTML attributes to the element
-      Object.entries(props).forEach(([key, value]) => {
-        if (value !== undefined) {
-          // Check if it's a valid property of the HTML element, if so set it
-          if (key in widget) {
-             (widget as any)[key] = value;
-          } else {
-             widget.setAttribute(key, String(value));
-          }
-        }
-      });
-
       syncWidgetProps(widget, {
         challengeEndpoint,
         verifyEndpoint,
@@ -239,15 +310,44 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
         }
       }, 0);
 
+      // The dispatcher is a stable ref created once, so capturing it here is
+      // safe and keeps the cleanup function self-contained.
+      const dispatchNativeEvent = nativeDispatcherRef.current;
+
       return () => {
         clearTimeout(fallbackTimer);
         widget.removeEventListener('verify', handleVerify);
         widget.removeEventListener('error', handleError);
         widget.removeEventListener('state-change', handleStateChange);
+        for (const eventType of boundEventTypesRef.current) {
+          widget.removeEventListener(eventType, dispatchNativeEvent);
+        }
+        boundEventTypesRef.current = new Set();
+        handlersRef.current = new Map();
         widget.remove();
         widgetRef.current = null;
       };
+      // Creation-only effect: prop changes are synced to the element by the
+      // effects below, so re-creating the element on every prop change would
+      // reset the widget and restart any verification in flight.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isLoading]);
+
+    // Re-apply standard HTML props after every render so updates propagate
+    // to the imperatively-created element (React never re-renders it), and
+    // bind native listeners for any newly-seen handler props (onClick, ...).
+    useEffect(() => {
+      const widget = widgetRef.current;
+      if (!widget) return;
+
+      applyStandardProps(widget, standardProps);
+
+      for (const eventType of handlersRef.current.keys()) {
+        if (boundEventTypesRef.current.has(eventType)) continue;
+        boundEventTypesRef.current.add(eventType);
+        widget.addEventListener(eventType, nativeDispatcherRef.current);
+      }
+    });
 
     useEffect(() => {
       if (!widgetRef.current) return;

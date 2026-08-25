@@ -407,8 +407,9 @@ describe('test challenge flow', () => {
         warn.mockRestore();
     });
 
-    it('handles non-Error verification failures', async () => {
+    it('classifies replay store failures as replay-store-unavailable', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const onWarning = vi.fn();
         const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
         const replayStore = {
@@ -417,17 +418,21 @@ describe('test challenge flow', () => {
             },
         };
 
-        await expect(verifyValid(token, solution!.nonce, {
+        await expect(verifySolution(token, solution!.nonce, {
             replayPrevention: 'remote',
             replayStore,
             debug: true,
-        })).resolves.toBe(false);
+            onWarning,
+        })).resolves.toMatchObject({ valid: false, reason: 'replay-store-unavailable' });
 
-        expect(warn).toHaveBeenCalledWith('[ribaunt] verifySolution rejected a token or nonce', { custom: 'failure' });
+        expect(onWarning).toHaveBeenCalledWith(expect.objectContaining({
+            reason: 'replay-store-unavailable',
+        }));
+        expect(warn).toHaveBeenCalledWith('[ribaunt] verifySolution failed because the replay store could not be reached', { custom: 'failure' });
         warn.mockRestore();
     });
 
-    it('logs an empty detail for undefined verification failures', async () => {
+    it('logs an empty detail for undefined replay store failures', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const [token] = await createChallenge(2, 1, 30);
         const solution = solveChallenge(token);
@@ -437,13 +442,13 @@ describe('test challenge flow', () => {
             },
         };
 
-        await expect(verifyValid(token, solution!.nonce, {
+        await expect(verifySolution(token, solution!.nonce, {
             replayPrevention: 'remote',
             replayStore,
             debug: true,
-        })).resolves.toBe(false);
+        })).resolves.toMatchObject({ valid: false, reason: 'replay-store-unavailable' });
 
-        expect(warn).toHaveBeenCalledWith('[ribaunt] verifySolution rejected a token or nonce', '');
+        expect(warn).toHaveBeenCalledWith('[ribaunt] verifySolution failed because the replay store could not be reached', '');
         warn.mockRestore();
     });
 

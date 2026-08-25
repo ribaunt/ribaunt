@@ -58,6 +58,40 @@ async function sha256(message: string): Promise<string> {
   return hashHex;
 }
 
+/**
+ * Yield to the event loop without the ~4ms clamping browsers apply to
+ * nested setTimeout calls. MessageChannel tasks run as macrotasks with
+ * microsecond-level latency, keeping the UI responsive at a fraction of
+ * the timer overhead.
+ *
+ * The channel is created lazily on first yield, and the receiving port is
+ * unref'd where supported (Node.js): a port with an active message listener
+ * otherwise keeps the host event loop alive and prevents clean exit.
+ */
+const yieldToEventLoop: () => Promise<void> = (() => {
+  if (typeof MessageChannel !== 'function') {
+    return () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+
+  let channel: MessageChannel | null = null;
+  const waiting = new Set<() => void>();
+
+  return () => {
+    if (!channel) {
+      channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        for (const resolve of waiting) resolve();
+        waiting.clear();
+      };
+      (channel.port1 as MessagePort & { unref?: () => void }).unref?.();
+    }
+    return new Promise<void>((resolve) => {
+      waiting.add(resolve);
+      channel!.port2.postMessage(null);
+    });
+  };
+})();
+
 export async function calibrateBrowser(iterations = 128): Promise<BrowserCalibration> {
   if (!Number.isFinite(iterations) || iterations < 1) {
     throw new Error('Calibration iterations must be at least 1');
@@ -104,9 +138,9 @@ export async function solveSingleChallenge(
 
     nonce++;
 
-    // Yield to prevent blocking the UI (every 1000 iterations)
-    if (nonce % 1000 === 0) {
-      await new Promise(resolve => setTimeout(resolve, 0));
+    // Yield to keep the UI responsive; each batch amortizes the yield cost.
+    if (nonce % 2048 === 0) {
+      await yieldToEventLoop();
     }
   }
 }
