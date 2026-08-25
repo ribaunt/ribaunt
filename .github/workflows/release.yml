@@ -34,7 +34,7 @@ jobs:
           published_version=""
           exact_version=""
 
-          if published_version="$(npm view "${package_name}" version --json 2>/tmp/npm-view-latest.log | node -e "let input = ''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(input ? JSON.parse(input) : ''));")"; then
+          if published_version="$(pnpm view "${package_name}" version --json 2>/tmp/npm-view-latest.log | node -e "let input = ''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(input ? JSON.parse(input) : ''));")"; then
             :
           elif grep -q "E404" /tmp/npm-view-latest.log; then
             published_version=""
@@ -43,7 +43,7 @@ jobs:
             exit 1
           fi
 
-          if exact_version="$(npm view "${package_name}@${version}" version --json 2>/tmp/npm-view-exact.log | node -e "let input = ''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(input ? JSON.parse(input) : ''));")"; then
+          if exact_version="$(pnpm view "${package_name}@${version}" version --json 2>/tmp/npm-view-exact.log | node -e "let input = ''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(input ? JSON.parse(input) : ''));")"; then
             changed="false"
           elif grep -q "E404" /tmp/npm-view-exact.log; then
             changed="true"
@@ -79,33 +79,34 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
+      - name: Enable pnpm
+        run: corepack enable
+
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20.x
-          cache: npm
+          cache: pnpm
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
+      # `pnpm test` builds once and runs the suite against those artifacts.
       - name: Run tests
-        run: npm test
+        run: pnpm test
 
       - name: Run coverage
-        run: npm run test:coverage
-
-      - name: Build package
-        run: npm run build
+        run: pnpm run test:coverage
 
       - name: Audit production dependencies
-        run: npm audit --omit=dev
+        run: pnpm audit --prod
 
       - name: Verify package contents
-        run: npm pack --dry-run
+        run: pnpm pack --dry-run
 
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        run: pnpm publish --provenance --access public --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

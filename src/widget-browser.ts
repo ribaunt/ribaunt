@@ -3,8 +3,16 @@
  * This file only exports the web component, not the server-side functions
  */
 
-export { RibauntWidget } from './widget.js';
-export { calibrateBrowser, calibrateClient } from './solver.js';
+export { RibauntWidget, WidgetError } from './widget.js';
+export type {
+  RibauntWidgetElement,
+  WidgetErrorCode,
+  WidgetErrorDetail,
+  WidgetState,
+  WidgetStateDetail,
+  WidgetVerifyDetail,
+} from './widget.js';
+export { calibrateBrowser, calibrateClient, type ChallengeSolution } from './solver.js';
 
 // Auto-register the widget when imported
 import './widget.js';

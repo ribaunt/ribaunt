@@ -36,7 +36,8 @@
     "./worker-client": {
       "types": "./dist/worker-client.d.ts",
       "default": "./dist/worker-client.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "repository": {
     "type": "git",
@@ -45,23 +46,33 @@
   "license": "GPL-3.0-only",
   "author": "ribaunt",
   "type": "module",
+  "packageManager": "pnpm@11.13.0",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "node scripts/clean.mjs && tsc && tsc --project tsconfig.cjs.json && node scripts/prepare-cjs.mjs",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "lint": "eslint .",
+    "test": "pnpm run build && vitest run",
+    "test:coverage": "pnpm run build && vitest run --coverage"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.6.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitest/coverage-v8": "^4.1.9",
     "dotenv": "^17.2.3",
+    "eslint": "^10.9.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.11.0",
     "ioredis": "^6.0.0",
     "jsdom": "^27.0.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0",
     "vitest": "^4.1.9"
   },
   "peerDependencies": {

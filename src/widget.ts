@@ -27,6 +27,8 @@
  * - state-change: Fired when widget state changes
  */
 
+import type { DetailedHTMLProps, HTMLAttributes } from 'react';
+
 import { calibrateBrowser, type ChallengeSolution } from './solver.js';
 import {
   solveChallengeWithWorker,
@@ -486,6 +488,20 @@ function parseTokenArray(value: unknown): string[] {
   return value;
 }
 
+/**
+ * Error carrying a machine-readable widget code so consumers can classify
+ * failures without depending on human-readable messages.
+ */
+export class WidgetError extends Error {
+  readonly code: WidgetErrorCode;
+
+  constructor(code: WidgetErrorCode, message: string) {
+    super(message);
+    this.name = 'WidgetError';
+    this.code = code;
+  }
+}
+
 function parseChallengeTokens(payload: unknown): string[] {
   if (Array.isArray(payload)) {
     return parseTokenArray(payload);
@@ -521,6 +537,7 @@ export class RibauntWidget extends HTMLElement {
   private autoVerifyStarted = false;
   private attemptController: AbortController | null = null;
   private progressAnimFrame: number | null = null;
+  private warnedWorkerMode: string | null = null;
 
   static get observedAttributes() {
     return [
@@ -542,7 +559,7 @@ export class RibauntWidget extends HTMLElement {
     super();
     this.shadow = this.attachShadow({ mode: 'open' });
     this.handleClick = this.handleClick.bind(this);
-    this.handleKeyPress = this.handleKeyPress.bind(this);
+    this.handleKeyDown = this.handleKeyDown.bind(this);
     this.handleLogoClick = this.handleLogoClick.bind(this);
   }
 
@@ -622,7 +639,7 @@ export class RibauntWidget extends HTMLElement {
   private attachEventListeners() {
     if (this.captchaElement) {
       this.captchaElement.addEventListener('click', this.handleClick);
-      this.captchaElement.addEventListener('keypress', this.handleKeyPress);
+      this.captchaElement.addEventListener('keydown', this.handleKeyDown);
     }
     if (this.logoElement) {
       this.logoElement.addEventListener('click', this.handleLogoClick);
@@ -632,7 +649,7 @@ export class RibauntWidget extends HTMLElement {
   private removeEventListeners() {
     if (this.captchaElement) {
       this.captchaElement.removeEventListener('click', this.handleClick);
-      this.captchaElement.removeEventListener('keypress', this.handleKeyPress);
+      this.captchaElement.removeEventListener('keydown', this.handleKeyDown);
     }
     if (this.logoElement) {
       this.logoElement.removeEventListener('click', this.handleLogoClick);
@@ -649,7 +666,7 @@ export class RibauntWidget extends HTMLElement {
     this.verify();
   }
 
-  private handleKeyPress(e: KeyboardEvent) {
+  private handleKeyDown(e: KeyboardEvent) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       this.handleClick();
@@ -692,7 +709,12 @@ export class RibauntWidget extends HTMLElement {
 
   private getWorkerMode(): WorkerMode {
     const value = this.getAttribute('worker-mode');
-    return value === 'required' || value === 'disabled' ? value : 'preferred';
+    if (value === 'required' || value === 'disabled') return value;
+    if (value !== null && this.warnedWorkerMode !== value) {
+      this.warnedWorkerMode = value;
+      console.warn(`[ribaunt] Unknown worker-mode "${value}"; falling back to "preferred".`);
+    }
+    return 'preferred';
   }
 
   private shouldCalibrate(): boolean {
@@ -836,11 +858,13 @@ export class RibauntWidget extends HTMLElement {
   }
 
   private getErrorCode(error: unknown): WidgetErrorCode {
+    if (error instanceof WidgetError) return error.code;
     if (error instanceof WorkerUnavailableError) return 'worker-unavailable';
     if (error instanceof DOMException && error.name === 'AbortError') {
       return this.timeoutError ? 'timeout' : 'aborted';
     }
     if (!(error instanceof Error)) return 'unknown';
+    // Legacy string matching for errors thrown without a code.
     if (error.message === 'Failed to fetch challenge') return 'challenge-fetch-failed';
     if (error.message === 'Verification failed') return 'verification-failed';
     if (error.message.startsWith('Challenge response') || error.message === 'No challenge tokens available') {
@@ -885,13 +909,20 @@ export class RibauntWidget extends HTMLElement {
             }
           : { signal: controller.signal };
         const response = await fetch(challengeEndpoint, request);
-        if (!response.ok) throw new Error('Failed to fetch challenge');
+        if (!response.ok) throw new WidgetError('challenge-fetch-failed', 'Failed to fetch challenge');
         const data = await response.json() as unknown;
-        tokens = parseChallengeTokens(data);
+        try {
+          tokens = parseChallengeTokens(data);
+        } catch (error) {
+          throw new WidgetError(
+            'invalid-challenge',
+            error instanceof Error ? error.message : String(error)
+          );
+        }
       }
 
       if (tokens.length === 0) {
-        throw new Error('No challenge tokens available');
+        throw new WidgetError('invalid-challenge', 'No challenge tokens available');
       }
 
       this.setState('solving');
@@ -909,7 +940,7 @@ export class RibauntWidget extends HTMLElement {
         });
 
         if (!response.ok) {
-          throw new Error('Verification failed');
+          throw new WidgetError('verification-failed', 'Verification failed');
         }
       }
 
@@ -1001,27 +1032,37 @@ if (typeof window !== 'undefined' && typeof customElements !== 'undefined' && !c
 // Export for use in TypeScript
 export default RibauntWidget;
 
-// Types declaration for DOM and JSX
+// Types declaration for DOM and React JSX
 declare global {
   interface HTMLElementTagNameMap {
     'ribaunt-widget': RibauntWidgetElement;
   }
+}
 
+export type RibauntWidgetJsxProps = DetailedHTMLProps<
+  HTMLAttributes<RibauntWidgetElement>,
+  RibauntWidgetElement
+> & {
+  'challenge-endpoint'?: string;
+  'verify-endpoint'?: string;
+  'auto-verify'?: string | boolean;
+  'show-warning'?: string | boolean;
+  'warning-message'?: string;
+  'solve-timeout'?: string;
+  'worker-mode'?: WorkerMode;
+  'challenge-method'?: 'GET' | 'POST';
+  calibrate?: string | boolean;
+  'show-progress'?: string | boolean;
+  disabled?: string | boolean;
+};
+
+declare module 'react' {
+  // `namespace JSX` inside a module augmentation is React's documented
+  // extension point for custom elements; it cannot be expressed as ES syntax.
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace JSX {
     interface IntrinsicElements {
-      'ribaunt-widget': import('react').DetailedHTMLProps<import('react').HTMLAttributes<RibauntWidgetElement>, RibauntWidgetElement> & {
-        'challenge-endpoint'?: string;
-        'verify-endpoint'?: string;
-        'auto-verify'?: string | boolean;
-        'show-warning'?: string | boolean;
-        'warning-message'?: string;
-        'solve-timeout'?: string;
-        'worker-mode'?: WorkerMode;
-        'challenge-method'?: 'GET' | 'POST';
-        calibrate?: string | boolean;
-        'show-progress'?: string | boolean;
-        disabled?: string | boolean;
-      };
+      'ribaunt-widget': RibauntWidgetJsxProps;
     }
   }
 }

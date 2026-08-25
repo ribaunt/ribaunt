@@ -76,7 +76,11 @@ The React wrapper now updates these props live after mount:
 - `showWarning`
 - `warningMessage`
 - `solveTimeout`
+- `showProgress`
+- `workerMode`
 - `disabled`
+
+It also binds standard handler props (`onClick`, `onKeyDown`, ...) as native event listeners and updates plain HTML props (`title`, `data-*`, ...) across renders without remounting.
 
 If your older integration used a changing `key` to force a remount when one of those values changed, that workaround can usually be removed.
 
