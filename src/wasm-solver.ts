@@ -24,6 +24,9 @@ interface WasmExports extends WebAssembly.Exports {
 let wasmInstance: WebAssembly.Instance | null = null;
 let wasmState: 'uninitialized' | 'wasm-ready' | 'wasm-unavailable' = 'uninitialized';
 let loadPromise: Promise<boolean> | null = null;
+let cachedChallenge: string | null = null;
+let cachedPtr = 0;
+let cachedLen = 0;
 
 // Internal WASM solver interface (narrow)
 export interface WasmSolver {
@@ -170,6 +173,9 @@ export function resetWasmForTesting(): void {
   wasmInstance = null;
   wasmState = 'uninitialized';
   loadPromise = null;
+  cachedChallenge = null;
+  cachedPtr = 0;
+  cachedLen = 0;
 }
 
 // For testing: allow injecting failure or mock
@@ -184,6 +190,9 @@ export function isWasmAvailable(): boolean {
 }
 
 export function resetWasmHeap(): void {
+  cachedChallenge = null;
+  cachedPtr = 0;
+  cachedLen = 0;
   if (wasmInstance) {
     try {
       const exp = wasmInstance.exports as unknown as { reset_heap?: () => void };
@@ -237,23 +246,33 @@ export function solveBatch(
   const exp = wasmInstance.exports as unknown as WasmExports;
   const mem = exp.memory;
 
-  // Encode challenge as UTF-8 bytes
-  const encoder = new TextEncoder();
-  const challengeBytes = encoder.encode(challenge);
-
-  // Allocate in WASM
-  const ptr = exp.alloc(challengeBytes.length);
-  // Refresh view after possible growth
-  const memU8 = new Uint8Array(mem.buffer);
-  // Bounds check: ensure ptr + len within memory
-  if (ptr < 0 || ptr + challengeBytes.length > memU8.length) {
-    throw new Error('WASM memory allocation out of bounds');
+  let ptr: number;
+  let challengeLen: number;
+  if (cachedChallenge === challenge && cachedPtr !== 0) {
+    ptr = cachedPtr;
+    challengeLen = cachedLen;
+  } else {
+    // Encode challenge as UTF-8 bytes
+    const encoder = new TextEncoder();
+    const challengeBytes = encoder.encode(challenge);
+    const newPtr = exp.alloc(challengeBytes.length);
+    // Refresh view after possible growth
+    const memU8 = new Uint8Array(mem.buffer);
+    // Bounds check: ensure ptr + len within memory
+    if (newPtr < 0 || newPtr + challengeBytes.length > memU8.length) {
+      throw new Error('WASM memory allocation out of bounds');
+    }
+    memU8.set(challengeBytes, newPtr);
+    cachedChallenge = challenge;
+    cachedPtr = newPtr;
+    cachedLen = challengeBytes.length;
+    ptr = newPtr;
+    challengeLen = cachedLen;
   }
-  memU8.set(challengeBytes, ptr);
 
   let result: number;
   try {
-    result = exp.solve_batch(ptr, challengeBytes.length, startNonce >>> 0, batchSize, difficulty);
+    result = exp.solve_batch(ptr, challengeLen, startNonce >>> 0, batchSize, difficulty);
   } catch (e) {
     throw new Error(`WASM solver trap: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
   }
