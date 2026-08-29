@@ -200,6 +200,7 @@ Plain LAN URLs such as `http://192.168.x.x` may not expose `crypto.subtle`, espe
 | `show-progress` | `showProgress` | `boolean\|string` | `true` | Set to `"false"` to switch to the secondary loader: a plain bars spinner with a static `Loading...` label instead of the conic progress ring and percentage counter. Progress is still tracked and reported through events. |
 | `solve-timeout` | `solveTimeout` | `number\|string` | `undefined` | Optional timeout in milliseconds for the whole verification attempt — fetching, solving, and verifying. If omitted, the attempt is not automatically timed out. |
 | `worker-mode` | `workerMode` | `'preferred'\|'required'\|'disabled'` | `'preferred'` | Controls Web Worker solving. `preferred` falls back to main-thread solving when workers are unavailable; `required` fails with `worker-unavailable`; `disabled` always solves on the main thread. Unknown values fall back to `preferred` with a console warning. |
+| `wasm-mode` | `wasmMode` | `'preferred'\|'disabled'` | `'preferred'` | Controls WASM batch solver inside worker. `preferred` uses WASM when available (transparent fallback to JS within worker); `disabled` always uses JS solver inside worker. Independent from `worker-mode`. Unknown values fall back to `preferred` with a warning. |
 | `disabled` | `disabled` | `boolean\|string` | `false` | Disables user interaction and programmatic verification while set. |
 
 ### Challenge Endpoint Response Shapes
@@ -235,9 +236,25 @@ When `disabled` is present and not equal to `"false"`:
   show-warning="true"
   warning-message="WASM is disabled; this may take 3x longer!"
   solve-timeout="15000"
+  worker-mode="preferred"
+  wasm-mode="preferred"
   disabled="false"
 ></ribaunt-widget>
 ```
+
+### WASM Solver
+
+The browser solver now ships with an optional WebAssembly-backed SHA-256 batch solver for higher throughput. By default `wasm-mode="preferred"` the worker attempts to load `dist/ribaunt-solver.wasm` via `new URL('./ribaunt-solver.wasm', import.meta.url)` and runs a batched hash loop (`solve_batch`) amortizing JS/WASM call overhead. If WASM is unavailable (WebAssembly disabled, asset fetch failure, CSP blocking `wasm-unsafe-eval`, or instantiation failure) the worker transparently falls back to the existing JS/WebCrypto solver without protocol changes.
+
+- `worker-mode` and `wasm-mode` are orthogonal: `worker-mode` controls worker availability, `wasm-mode` controls WASM inside a healthy worker.
+- `wasm-mode="disabled"` forces JS solver inside worker; useful for debugging or restrictive CSP deployments.
+- Batch size is an internal implementation detail (default 1024) tuned via `bench/wasm-vs-js.ts` benchmarks.
+- Cancellation is observed at batch boundaries; worst-case latency is one batch.
+- The WASM binary is built reproducibly from `src/wasm/solver.ts` via `scripts/build-wasm.mjs` using the pinned `assemblyscript` toolchain. No third-party binary is fetched at runtime.
+
+**CSP / Bundling:** WASM loading may require `script-src` to allow `wasm-unsafe-eval` in strict CSP deployments and `connect-src`/`script-src` access to the `.wasm` asset. Vite, Next.js, and native ESM all handle `new URL(..., import.meta.url)` assets; verify your bundler preserves the sibling `.wasm` file (pnpm pack includes it; check `dist/ribaunt-solver.wasm` exists).
+
+To disable WASM entirely: `<ribaunt-widget wasm-mode="disabled">` or `wasmMode="disabled"` in React. To observe backend selection, listen for `solver-backend` DOM event: `widget.addEventListener('solver-backend', e => console.log(e.detail.backend))` (`wasm`|`js`). Telemetry never includes challenge contents.
 
 ### Secondary Loader: `show-progress="false"`
 
@@ -266,6 +283,7 @@ When using the React wrapper (`ribaunt/widget-react`), all HTML attributes above
 | `warningMessage` | `string` | (HTML: `warning-message`) |
 | `showProgress` | `boolean\|string` | (HTML: `show-progress`) |
 | `solveTimeout` | `number\|string` | (HTML: `solve-timeout`) |
+| `wasmMode` | `WasmMode` | (HTML: `wasm-mode`) `preferred`\|`disabled` |
 | `disabled` | `boolean\|string` | (HTML: `disabled`) |
 | `onVerify` | `(detail) => void` | Fired when verification succeeds |
 | `onError` | `(detail) => void` | Fired when an error occurs |

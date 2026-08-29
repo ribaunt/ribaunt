@@ -313,6 +313,7 @@ const solutions = solveChallenge(challenges, {
   warning-message="Verification may take longer on this device."
   solve-timeout="15000"
   worker-mode="preferred"
+  wasm-mode="preferred"
   disabled="false"
 ></ribaunt-widget>
 ```
@@ -329,6 +330,7 @@ const solutions = solveChallenge(challenges, {
 | `show-progress` | `showProgress` | Set to `"false"` to swap the percentage ring for a plain bars spinner with a static `Loading...` label. |
 | `solve-timeout` | `solveTimeout` | Optional timeout in milliseconds for the whole verification attempt (fetching, solving, and verifying). |
 | `worker-mode` | `workerMode` | Web Worker solving: `preferred` (default; falls back to the main thread), `required` (fail if unavailable), or `disabled`. |
+| `wasm-mode` | `wasmMode` | WASM solver: `preferred` (default; uses WASM batch solver inside worker if available), `disabled` (always use JS solver inside worker). Independent from `worker-mode`. |
 | `disabled` | `disabled` | Blocks user interaction and automatic verification. |
 | | `fallback` | React-only. Custom loading element while widget dynamic import loads. Defaults to a built-in shimmer skeleton. |
 

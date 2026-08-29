@@ -158,4 +158,30 @@ describe('package smoke tests', () => {
     expect(workflows).toContain('actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10');
     expect(workflows).toContain('actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020');
   });
+
+  it('includes the WASM solver artifact in the package', () => {
+    const wasmPath = resolve(rootDir, 'dist/ribaunt-solver.wasm');
+    expect(existsSync(wasmPath)).toBe(true);
+    const stat = readFileSync(wasmPath);
+    expect(stat.length).toBeGreaterThan(0);
+    // Check that npm pack dry-run would include it (files not ignored)
+    const npmIgnore = readFileSync(resolve(rootDir, '.npmignore'), 'utf8');
+    expect(npmIgnore).not.toContain('ribaunt-solver.wasm');
+    expect(npmIgnore).not.toMatch(/^dist\/?\s*$/m);
+  });
+
+  it('exposes wasm-mode via widget types', () => {
+    const widgetDts = readFileSync(resolve(rootDir, 'dist/widget.d.ts'), 'utf8');
+    expect(widgetDts).toContain('wasm-mode');
+    expect(widgetDts).toContain('WasmMode');
+    const workerClientDts = readFileSync(resolve(rootDir, 'dist/worker-client.d.ts'), 'utf8');
+    expect(workerClientDts).toContain('WasmMode');
+    expect(workerClientDts).toContain('SolverBackend');
+  });
+
+  it('points worker assets remain resolvable', () => {
+    expect(existsSync(resolve(rootDir, 'dist/solver-worker.js'))).toBe(true);
+    expect(existsSync(resolve(rootDir, 'dist/wasm-solver.js'))).toBe(true);
+    expect(existsSync(resolve(rootDir, 'dist/ribaunt-solver.wasm'))).toBe(true);
+  });
 });

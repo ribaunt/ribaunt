@@ -8,7 +8,7 @@ import type {
   WidgetStateDetail,
   WidgetVerifyDetail,
 } from './widget.js';
-import type { WorkerMode } from './worker-client.js';
+import type { WorkerMode, WasmMode } from './worker-client.js';
 
 export type {
   RibauntWidgetElement,
@@ -26,6 +26,7 @@ export interface RibauntWidgetProps extends Omit<React.HTMLAttributes<RibauntWid
   warningMessage?: string;
   solveTimeout?: number | string;
   workerMode?: WorkerMode;
+  wasmMode?: WasmMode;
   challengeMethod?: 'GET' | 'POST';
   calibrate?: boolean | string;
   showProgress?: boolean | string;
@@ -113,6 +114,7 @@ function syncWidgetProps(
     warningMessage,
     solveTimeout,
     workerMode,
+    wasmMode,
     challengeMethod,
     calibrate,
     showProgress,
@@ -126,6 +128,7 @@ function syncWidgetProps(
     warningMessage: string | undefined;
     solveTimeout: number | string | undefined;
     workerMode: WorkerMode | undefined;
+    wasmMode: WasmMode | undefined;
     challengeMethod: 'GET' | 'POST' | undefined;
     calibrate: boolean | string | undefined;
     showProgress: boolean | string | undefined;
@@ -139,6 +142,7 @@ function syncWidgetProps(
   syncAttribute(element, 'warning-message', warningMessage);
   syncAttribute(element, 'solve-timeout', solveTimeout);
   syncAttribute(element, 'worker-mode', workerMode);
+  syncAttribute(element, 'wasm-mode', wasmMode);
   syncAttribute(element, 'challenge-method', challengeMethod);
   syncAttribute(element, 'calibrate', calibrate);
   // showProgress is tri-state, not presence-based: the widget hides progress
@@ -165,6 +169,7 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       warningMessage,
       solveTimeout,
       workerMode,
+      wasmMode,
       challengeMethod,
       calibrate,
       showProgress,
@@ -279,6 +284,7 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
         warningMessage,
         solveTimeout,
         workerMode,
+        wasmMode,
         challengeMethod,
         calibrate,
         showProgress,
@@ -360,6 +366,7 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
         warningMessage,
         solveTimeout,
         workerMode,
+        wasmMode,
         challengeMethod,
         calibrate,
         showProgress,
@@ -373,6 +380,7 @@ export const RibauntWidget = forwardRef<RibauntWidgetHandle, RibauntWidgetProps>
       warningMessage,
       solveTimeout,
       workerMode,
+      wasmMode,
       challengeMethod,
       calibrate,
       showProgress,
