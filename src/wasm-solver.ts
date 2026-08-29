@@ -32,6 +32,10 @@ export interface WasmSolver {
 
 const VALID_HASH_RE = /^[a-f0-9]{64}$/;
 const VALID_NONCE_RE = /^\d+$/;
+const VALID_SHA256_HEX_RE = /^[a-f0-9]{64}$/i;
+// Embedded SHA-256 of dist/ribaunt-solver.wasm for integrity verification.
+// Recompute with `shasum -a 256 dist/ribaunt-solver.wasm` after rebuilding wasm.
+const EMBEDDED_WASM_SHA256 = '837730ef1ed09e855e4328d34d0bd9e9d237c182a2795a70455ed60de456879e';
 
 function isValidHash(hash: string): boolean {
   return VALID_HASH_RE.test(hash);
@@ -39,6 +43,33 @@ function isValidHash(hash: string): boolean {
 
 function isValidNonce(nonce: string): boolean {
   return nonce.length > 0 && VALID_NONCE_RE.test(nonce);
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const subtle = typeof crypto !== 'undefined' ? (crypto as unknown as { subtle?: SubtleCrypto }).subtle : undefined;
+  if (subtle) {
+    const digest = await subtle.digest('SHA-256', bytes as unknown as BufferSource);
+    return bytesToHex(new Uint8Array(digest));
+  }
+  // Node fallback when Web Crypto is unavailable
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nodeCrypto = await import('node:crypto') as any;
+  return nodeCrypto.createHash('sha256').update(bytes).digest('hex') as string;
+}
+
+function getExpectedWasmSha256(): string | null {
+  const g = globalThis as unknown as { __RIBAUNT_WASM_SHA256__?: string };
+  const fromGlobal = typeof g.__RIBAUNT_WASM_SHA256__ === 'string' ? g.__RIBAUNT_WASM_SHA256__.trim().toLowerCase() : '';
+  if (fromGlobal && VALID_SHA256_HEX_RE.test(fromGlobal)) return fromGlobal;
+  const proc = typeof process !== 'undefined' ? (process as unknown as { env?: Record<string, string | undefined> }) : undefined;
+  const fromEnv = proc?.env?.RIBAUNT_WASM_SHA256?.trim().toLowerCase() ?? '';
+  if (fromEnv && VALID_SHA256_HEX_RE.test(fromEnv)) return fromEnv;
+  if (EMBEDDED_WASM_SHA256 && VALID_SHA256_HEX_RE.test(EMBEDDED_WASM_SHA256)) return EMBEDDED_WASM_SHA256.toLowerCase();
+  return null;
 }
 
 async function loadWasmBytes(): Promise<Uint8Array> {
@@ -97,7 +128,11 @@ async function instantiateWasm(): Promise<boolean> {
 
   try {
     const bytes = await loadWasmBytes();
-    const mod = await WebAssembly.compile(bytes as unknown as ArrayBuffer);
+    const expectedSha256 = getExpectedWasmSha256();
+    if (!expectedSha256) return false;
+    const actualSha256 = await sha256Hex(bytes);
+    if (actualSha256 !== expectedSha256) return false;
+    const mod = await WebAssembly.compile(bytes as unknown as BufferSource);
     const instance = await WebAssembly.instantiate(mod, {});
     const exp = instance.exports as Partial<WasmExports>;
 
