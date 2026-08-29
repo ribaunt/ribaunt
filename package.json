@@ -51,7 +51,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "node scripts/clean.mjs && tsc && tsc --project tsconfig.cjs.json && node scripts/prepare-cjs.mjs",
+    "build": "node scripts/clean.mjs && node scripts/build-wasm.mjs && tsc && tsc --project tsconfig.cjs.json && node scripts/prepare-cjs.mjs && node scripts/prepare-demo.mjs",
+    "build:wasm": "node scripts/build-wasm.mjs",
     "lint": "eslint .",
     "test": "pnpm run build && vitest run",
     "test:coverage": "pnpm run build && vitest run --coverage"
@@ -63,6 +64,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitest/coverage-v8": "^4.1.9",
+    "assemblyscript": "0.28.20",
     "dotenv": "^17.2.3",
     "eslint": "^10.9.0",
     "eslint-plugin-react-hooks": "^7.1.1",

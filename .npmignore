@@ -15,3 +15,5 @@ SKILLS.md
 context7.json
 docs/
 scripts/
+src/wasm/
+bench/

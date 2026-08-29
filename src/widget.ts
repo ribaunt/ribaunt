@@ -34,6 +34,8 @@ import {
   solveChallengeWithWorker,
   WorkerUnavailableError,
   type WorkerMode,
+  type WasmMode,
+  type SolverBackend,
 } from './worker-client.js';
 
 const WIDGET_STYLES = `
@@ -472,6 +474,11 @@ export interface WidgetErrorDetail {
   phase: 'error';
 }
 
+export interface WidgetBackendDetail {
+  backend: SolverBackend;
+  phase: 'solving';
+}
+
 function parseTokenArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     throw new Error('Challenge response must be an array of token strings');
@@ -538,6 +545,7 @@ export class RibauntWidget extends HTMLElement {
   private attemptController: AbortController | null = null;
   private progressAnimFrame: number | null = null;
   private warnedWorkerMode: string | null = null;
+  private warnedWasmMode: string | null = null;
 
   static get observedAttributes() {
     return [
@@ -548,6 +556,7 @@ export class RibauntWidget extends HTMLElement {
       'warning-message',
       'solve-timeout',
       'worker-mode',
+      'wasm-mode',
       'challenge-method',
       'calibrate',
       'show-progress',
@@ -709,10 +718,21 @@ export class RibauntWidget extends HTMLElement {
 
   private getWorkerMode(): WorkerMode {
     const value = this.getAttribute('worker-mode');
-    if (value === 'required' || value === 'disabled') return value;
+    if (value === 'required' || value === 'disabled' || value === 'preferred') return value;
     if (value !== null && this.warnedWorkerMode !== value) {
       this.warnedWorkerMode = value;
       console.warn(`[ribaunt] Unknown worker-mode "${value}"; falling back to "preferred".`);
+    }
+    return 'preferred';
+  }
+
+  private getWasmMode(): WasmMode {
+    const value = this.getAttribute('wasm-mode');
+    if (value === 'disabled') return 'disabled';
+    if (value === 'preferred' || value === null) return 'preferred';
+    if (this.warnedWasmMode !== value) {
+      this.warnedWasmMode = value;
+      console.warn(`[ribaunt] Unknown wasm-mode "${value}"; falling back to "preferred".`);
     }
     return 'preferred';
   }
@@ -926,9 +946,28 @@ export class RibauntWidget extends HTMLElement {
       }
 
       this.setState('solving');
-      const solutions = await solveChallengeWithWorker(tokens, (progress) => {
-        this.setProgress(progress);
-      }, controller.signal, this.getWorkerMode());
+      const solutions = await solveChallengeWithWorker(
+        tokens,
+        (progress) => {
+          this.setProgress(progress);
+        },
+        controller.signal,
+        this.getWorkerMode(),
+        this.getWasmMode(),
+        (backend) => {
+          try {
+            this.dispatchEvent(
+              new CustomEvent('solver-backend', {
+                detail: { backend, phase: 'solving' } satisfies WidgetBackendDetail,
+                bubbles: true,
+                composed: true,
+              })
+            );
+          } catch {
+            // telemetry must never break solving
+          }
+        }
+      );
 
       this.setState('verifying');
       if (verifyEndpoint) {
@@ -1050,6 +1089,7 @@ export type RibauntWidgetJsxProps = DetailedHTMLProps<
   'warning-message'?: string;
   'solve-timeout'?: string;
   'worker-mode'?: WorkerMode;
+  'wasm-mode'?: WasmMode;
   'challenge-method'?: 'GET' | 'POST';
   calibrate?: string | boolean;
   'show-progress'?: string | boolean;

@@ -1,0 +1,269 @@
+/**
+ * TypeScript adapter for the WASM SHA-256 solver.
+ * Contains all WASM-specific implementation details and validates boundary values.
+ */
+
+export type WasmMode = 'preferred' | 'disabled';
+
+export interface WasmBatchResult {
+  found: boolean;
+  nonce?: string;
+  hash?: string;
+}
+
+interface WasmExports extends WebAssembly.Exports {
+  memory: WebAssembly.Memory;
+  alloc(size: number): number;
+  solve_batch(challenge_ptr: number, challenge_len: number, start_nonce: number, batch_size: number, difficulty: number): number;
+  get_hash_ptr(): number;
+  get_hash_len(): number;
+  get_msg_ptr(): number;
+  reset_heap(): void;
+}
+
+let wasmInstance: WebAssembly.Instance | null = null;
+let wasmState: 'uninitialized' | 'wasm-ready' | 'wasm-unavailable' = 'uninitialized';
+let loadPromise: Promise<boolean> | null = null;
+
+// Internal WASM solver interface (narrow)
+export interface WasmSolver {
+  solveBatch(challenge: string, startNonce: number, batchSize: number, difficulty: number): WasmBatchResult;
+}
+
+const VALID_HASH_RE = /^[a-f0-9]{64}$/;
+const VALID_NONCE_RE = /^\d+$/;
+
+function isValidHash(hash: string): boolean {
+  return VALID_HASH_RE.test(hash);
+}
+
+function isValidNonce(nonce: string): boolean {
+  return nonce.length > 0 && VALID_NONCE_RE.test(nonce);
+}
+
+async function loadWasmBytes(): Promise<Uint8Array> {
+  const candidates: URL[] = [];
+  try {
+    candidates.push(new URL('./ribaunt-solver.wasm', import.meta.url));
+  } catch (_e) { void _e; }
+  try {
+    candidates.push(new URL('../dist/ribaunt-solver.wasm', import.meta.url));
+  } catch (_e) { void _e; }
+  try {
+    candidates.push(new URL('./dist/ribaunt-solver.wasm', import.meta.url));
+  } catch (_e) { void _e; }
+
+  // Browser / worker path: try fetch for each candidate
+  if (typeof fetch === 'function') {
+    for (const cand of candidates) {
+      try {
+        const res = await fetch(cand);
+        if (res.ok) {
+          const buf = await res.arrayBuffer();
+          if (buf.byteLength > 0) return new Uint8Array(buf);
+        }
+      } catch (_e) { void _e; }
+    }
+  }
+
+  // Node.js fallback: try fs for candidates plus cwd
+  const fsCandidates: (string | URL)[] = [...candidates];
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pathMod = await import('node:path') as any;
+    const cwd = typeof process !== 'undefined' ? process.cwd() : '';
+    if (cwd) {
+      fsCandidates.push(pathMod.resolve(cwd, 'dist/ribaunt-solver.wasm'));
+      fsCandidates.push(pathMod.resolve(cwd, 'dist/cjs/ribaunt-solver.wasm'));
+    }
+  } catch (_e) { void _e; }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fs = await import('node:fs/promises') as any;
+    for (const cand of fsCandidates) {
+      try {
+        const bytes = await fs.readFile(cand as string);
+        if (bytes && (bytes as Uint8Array).length > 0) return bytes as Uint8Array;
+      } catch (_e) { void _e; }
+    }
+  } catch (_e) { void _e; }
+
+  throw new Error('WASM asset fetch failure');
+}
+
+async function instantiateWasm(): Promise<boolean> {
+  if (typeof WebAssembly === 'undefined') return false;
+
+  try {
+    const bytes = await loadWasmBytes();
+    const mod = await WebAssembly.compile(bytes as unknown as ArrayBuffer);
+    const instance = await WebAssembly.instantiate(mod, {});
+    const exp = instance.exports as Partial<WasmExports>;
+
+    if (!exp.memory || typeof exp.solve_batch !== 'function' || typeof exp.get_hash_ptr !== 'function' || typeof exp.alloc !== 'function') {
+      return false;
+    }
+
+    wasmInstance = instance;
+    wasmState = 'wasm-ready';
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function ensureWasm(): Promise<boolean> {
+  if (wasmState === 'wasm-ready') return true;
+  if (wasmState === 'wasm-unavailable') return false;
+  if (loadPromise) return loadPromise;
+
+  loadPromise = (async () => {
+    const ok = await instantiateWasm();
+    wasmState = ok ? 'wasm-ready' : 'wasm-unavailable';
+    return ok;
+  })();
+
+  return loadPromise;
+}
+
+export function getWasmState(): typeof wasmState {
+  return wasmState;
+}
+
+export function resetWasmForTesting(): void {
+  wasmInstance = null;
+  wasmState = 'uninitialized';
+  loadPromise = null;
+}
+
+// For testing: allow injecting failure or mock
+export function setWasmUnavailableForTesting(): void {
+  wasmState = 'wasm-unavailable';
+  wasmInstance = null;
+  loadPromise = Promise.resolve(false);
+}
+
+export function isWasmAvailable(): boolean {
+  return wasmState === 'wasm-ready';
+}
+
+export function resetWasmHeap(): void {
+  if (wasmInstance) {
+    try {
+      const exp = wasmInstance.exports as unknown as { reset_heap?: () => void };
+      exp.reset_heap?.();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Synchronous batch solver - must be called after ensureWasm() succeeds.
+ * Encodes challenge as UTF-8, allocates in WASM memory, calls solve_batch,
+ * validates and returns result.
+ */
+export function solveBatch(
+  challenge: string,
+  startNonce: number,
+  batchSize: number,
+  difficulty: number
+): WasmBatchResult {
+  if (wasmState !== 'wasm-ready' || !wasmInstance) {
+    throw new Error('WASM solver not initialized');
+  }
+
+  // Validate inputs
+  if (!Number.isInteger(difficulty) || difficulty < 1 || difficulty > 64) {
+    throw new Error('Invalid difficulty');
+  }
+  if (!Number.isInteger(batchSize) || batchSize <= 0 || batchSize > 16384) {
+    throw new Error('Invalid batchSize');
+  }
+  if (!Number.isInteger(startNonce) || startNonce < 0 || !Number.isFinite(startNonce)) {
+    throw new Error('Invalid startNonce');
+  }
+  if (typeof challenge !== 'string') {
+    throw new Error('Invalid challenge');
+  }
+  // Overflow guard before calling WASM (also checked inside)
+  if (startNonce > 0xffffffff - batchSize + 1) {
+    throw new Error('Nonce range exceeds u32');
+  }
+  // Also guard signed limit to avoid sentinel confusion (max 2^31-1 for v1)
+  if (startNonce > 0x7fffffff || startNonce + batchSize > 0x7fffffff) {
+    // fallback to JS for large nonces; treat as not found here so caller can handle
+    // but we throw to let caller fallback? Instead return not-found and let caller manage?
+    // For now throw to surface, worker will fallback to JS
+    throw new Error('Nonce exceeds wasm signed limit');
+  }
+
+  const exp = wasmInstance.exports as unknown as WasmExports;
+  const mem = exp.memory;
+
+  // Encode challenge as UTF-8 bytes
+  const encoder = new TextEncoder();
+  const challengeBytes = encoder.encode(challenge);
+
+  // Allocate in WASM
+  const ptr = exp.alloc(challengeBytes.length);
+  // Refresh view after possible growth
+  const memU8 = new Uint8Array(mem.buffer);
+  // Bounds check: ensure ptr + len within memory
+  if (ptr < 0 || ptr + challengeBytes.length > memU8.length) {
+    throw new Error('WASM memory allocation out of bounds');
+  }
+  memU8.set(challengeBytes, ptr);
+
+  let result: number;
+  try {
+    result = exp.solve_batch(ptr, challengeBytes.length, startNonce >>> 0, batchSize, difficulty);
+  } catch (e) {
+    throw new Error(`WASM solver trap: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+  }
+
+  if (result === -1) {
+    return { found: false };
+  }
+  if (result === -2) {
+    throw new Error('WASM solver overflow');
+  }
+  if (result < 0) {
+    throw new Error(`WASM solver internal error: ${result}`);
+  }
+
+  // Validate nonce
+  const nonceStr = String(result >>> 0);
+  if (!isValidNonce(nonceStr)) {
+    throw new Error('WASM returned invalid nonce');
+  }
+
+  // Read hash
+  const hashPtr = exp.get_hash_ptr();
+  const hashLen = 32;
+  const mem2 = new Uint8Array(mem.buffer);
+  if (hashPtr < 0 || hashPtr + hashLen > mem2.length) {
+    throw new Error('WASM hash pointer out of bounds');
+  }
+  const hashBytes = mem2.slice(hashPtr, hashPtr + hashLen);
+  const hashHex = Array.from(hashBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+
+  if (!isValidHash(hashHex)) {
+    throw new Error('WASM returned invalid hash');
+  }
+  if (!hashHex.startsWith('0'.repeat(difficulty))) {
+    throw new Error('WASM returned hash that does not satisfy difficulty');
+  }
+
+  // Additional validation: ensure hash corresponds to challenge+nonce (defense in depth)
+  // We trust WASM but validate shape; deeper verification (re-hashing in JS) could be done
+  // but would duplicate work. We just validate invariants.
+
+  return { found: true, nonce: nonceStr, hash: hashHex };
+}
+
+// Re-export for worker to use TextEncoder check
+export function isTextEncoderAvailable(): boolean {
+  return typeof TextEncoder !== 'undefined';
+}

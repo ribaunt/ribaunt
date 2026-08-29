@@ -99,4 +99,17 @@ If you use the React wrapper (`ribaunt/widget-react`), you get built-in strongly
 
 - **`onEvent`**: Fires for all events with the event type (`'verify'`, `'error'`, `'state-change'`, or `'ready'`) and its detail. This is a catch-all handler that can be used instead of individual callbacks.
 
-The React wrapper also syncs all widget props after mount, including `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `challengeMethod`, `calibrate`, `showWarning`, `warningMessage`, `solveTimeout`, `showProgress`, `workerMode`, and `disabled`.
+The React wrapper also syncs all widget props after mount, including `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `challengeMethod`, `calibrate`, `showWarning`, `warningMessage`, `solveTimeout`, `showProgress`, `workerMode`, `wasmMode`, and `disabled`.
+
+## 4. `solver-backend`
+Dispatched once per solve request when the worker selects its solving backend. Useful for adoption telemetry and A/B benchmarking. Never includes challenge contents, nonces, or hashes.
+
+**Event Type:** `CustomEvent<{ backend: 'wasm' | 'js'; phase: 'solving' }>`
+
+```javascript
+widget.addEventListener('solver-backend', (e) => {
+  console.log('Using backend:', e.detail.backend);
+});
+```
+
+In React you can also listen via `onEvent` or directly via `addEventListener` on the element. The event is fired after the worker chooses `wasm` (when `wasm-mode="preferred"` and WebAssembly loads) or `js` (when disabled or unavailable). Worker unavailable fallback to main-thread JS does not emit this event; `error` with `worker-unavailable` is emitted instead.

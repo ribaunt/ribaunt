@@ -111,6 +111,10 @@ export async function calibrateBrowser(iterations = 128): Promise<BrowserCalibra
 
 export const calibrateClient = calibrateBrowser;
 
+export function decodeChallengeToken(token: string): ChallengePayload | null {
+  return decodeJWT(token);
+}
+
 /**
  * Solve a single challenge token (browser-compatible)
  */
