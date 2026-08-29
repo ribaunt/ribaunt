@@ -92,6 +92,7 @@ function solveInWorker(
         return;
       }
       if (message.type === 'backend' && message.backend) {
+        if (cancelled) return;
         try {
           onBackend?.(message.backend);
         } catch {

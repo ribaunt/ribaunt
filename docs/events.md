@@ -1,6 +1,6 @@
 # Events Reference
 
-The Ribaunt CAPTCHA widget emits three standard DOM events (`CustomEvent`) that notify you of the lifecycle and results.
+The Ribaunt CAPTCHA widget emits four standard DOM events (`CustomEvent`) that notify you of the lifecycle and results.
 It also emits an initial `state-change` event immediately after the widget mounts with one of these states:
 `initial`, `fetching`, `solving`, `verifying`, `done`, `error`.
 
@@ -97,7 +97,7 @@ If you use the React wrapper (`ribaunt/widget-react`), you get built-in strongly
 
 - **`onReady` & `onLoad`**: Both fire once after the widget mounts with the initial widget state. They are functionally equivalent; `onLoad` is provided as an alias for backward compatibility. These events are **React-only** and do not fire on the web component itself.
 
-- **`onEvent`**: Fires for all events with the event type (`'verify'`, `'error'`, `'state-change'`, or `'ready'`) and its detail. This is a catch-all handler that can be used instead of individual callbacks.
+- **`onEvent`**: Fires for all events with the event type (`'verify'`, `'error'`, `'state-change'`, `'solver-backend'`, or `'ready'`) and its detail. This is a catch-all handler that can be used instead of individual callbacks.
 
 The React wrapper also syncs all widget props after mount, including `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `challengeMethod`, `calibrate`, `showWarning`, `warningMessage`, `solveTimeout`, `showProgress`, `workerMode`, `wasmMode`, and `disabled`.
 
@@ -112,4 +112,4 @@ widget.addEventListener('solver-backend', (e) => {
 });
 ```
 
-In React you can also listen via `onEvent` or directly via `addEventListener` on the element. The event is fired after the worker chooses `wasm` (when `wasm-mode="preferred"` and WebAssembly loads) or `js` (when disabled or unavailable). Worker unavailable fallback to main-thread JS does not emit this event; `error` with `worker-unavailable` is emitted instead.
+In React you can also listen via `onEvent` or directly via `addEventListener` on the element. The event is fired after the worker chooses `wasm` (when `wasm-mode="preferred"` and WebAssembly loads) or `js` (when disabled or unavailable). No `solver-backend` is emitted when `worker-mode="preferred"` falls back to main-thread JS; `error` with `worker-unavailable` is only emitted when `worker-mode="required"` and the worker is unavailable.

@@ -38,7 +38,7 @@ const VALID_NONCE_RE = /^\d+$/;
 const VALID_SHA256_HEX_RE = /^[a-f0-9]{64}$/i;
 // Embedded SHA-256 of dist/ribaunt-solver.wasm for integrity verification.
 // Recompute with `shasum -a 256 dist/ribaunt-solver.wasm` after rebuilding wasm.
-const EMBEDDED_WASM_SHA256 = '837730ef1ed09e855e4328d34d0bd9e9d237c182a2795a70455ed60de456879e';
+const EMBEDDED_WASM_SHA256 = '774398452596d67491a6ee5bd6291c9665dc4fc1a83db15f14dbbb4058f74c3e';
 
 function isValidHash(hash: string): boolean {
   return VALID_HASH_RE.test(hash);
@@ -235,11 +235,8 @@ export function solveBatch(
   if (startNonce > 0xffffffff - batchSize + 1) {
     throw new Error('Nonce range exceeds u32');
   }
-  // Also guard signed limit to avoid sentinel confusion (max 2^31-1 for v1)
-  if (startNonce > 0x7fffffff || startNonce + batchSize > 0x7fffffff) {
-    // fallback to JS for large nonces; treat as not found here so caller can handle
-    // but we throw to let caller fallback? Instead return not-found and let caller manage?
-    // For now throw to surface, worker will fallback to JS
+  // Also guard signed limit to avoid sentinel confusion (max 2^31-1 for v1); allow final batch where last nonce is 0x7fffffff
+  if (startNonce > 0x7fffffff || startNonce + batchSize > 0x7fffffff + 1) {
     throw new Error('Nonce exceeds wasm signed limit');
   }
 
@@ -255,6 +252,9 @@ export function solveBatch(
     // Encode challenge as UTF-8 bytes
     const encoder = new TextEncoder();
     const challengeBytes = encoder.encode(challenge);
+    if (challengeBytes.length > 1014) {
+      throw new Error('Challenge too long for WASM solver');
+    }
     const newPtr = exp.alloc(challengeBytes.length);
     // Refresh view after possible growth
     const memU8 = new Uint8Array(mem.buffer);

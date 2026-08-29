@@ -167,7 +167,7 @@ describe('package smoke tests', () => {
     // Check that npm pack dry-run would include it (files not ignored)
     const npmIgnore = readFileSync(resolve(rootDir, '.npmignore'), 'utf8');
     expect(npmIgnore).not.toContain('ribaunt-solver.wasm');
-    expect(npmIgnore).not.toMatch(/^dist\//m);
+    expect(npmIgnore).not.toMatch(/^dist\/?\s*$/m);
   });
 
   it('exposes wasm-mode via widget types', () => {

@@ -73,8 +73,8 @@ async function solveSingleChallengeWasm(
 
       startNonce += WASM_BATCH_SIZE;
 
-      // Overflow guard - do not wrap
-      if (startNonce > 0x7fffffff - WASM_BATCH_SIZE) {
+      // Overflow guard - do not wrap; allow final batch where last nonce is 0x7fffffff
+      if (startNonce > 0x7fffffff - WASM_BATCH_SIZE + 1) {
         throw new Error('WASM solver nonce overflow');
       }
 

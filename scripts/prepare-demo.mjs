@@ -32,8 +32,9 @@ const files = [
 for (const f of files) {
   try {
     await cp(resolve(dist, f), resolve(demoLib, f), { force: true });
-  } catch {
-    // ignore missing map files
+  } catch (error) {
+    if (f.endsWith('.map') && error?.code === 'ENOENT') continue;
+    throw error;
   }
 }
 

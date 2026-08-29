@@ -352,7 +352,7 @@ export function get_msg_ptr(): usize {
 // To keep simple, we return -1 for all non-found cases, and caller checks overflow separately
 export function solve_batch(challenge_ptr: usize, challenge_len: i32, start_nonce: u32, batch_size: i32, difficulty: i32): i32 {
   if (batch_size <= 0) return -1;
-  if (challenge_len < 0 || challenge_len > 4096) return -1;
+  if (challenge_len < 0 || challenge_len > 1014) return -1;
   if (difficulty < 1 || difficulty > 64) return -1;
   // overflow check: start_nonce + batch_size -1 must not wrap
   let end: u64 = <u64>start_nonce + <u64>batch_size - 1;
