@@ -39,7 +39,9 @@ describe('package smoke tests', () => {
             verifySolution: typeof mod.verifySolution,
             selectWorkload: typeof mod.selectWorkload,
             calibrateNode: typeof mod.calibrateNode,
-            calibrateClient: typeof mod.calibrateClient
+            calibrateClient: typeof mod.calibrateClient,
+            assess: typeof mod.assess,
+            DEFAULT_RISK_THRESHOLDS: typeof mod.DEFAULT_RISK_THRESHOLDS
           }));
         `,
       ],
@@ -57,7 +59,9 @@ describe('package smoke tests', () => {
             verifySolution: typeof mod.verifySolution,
             selectWorkload: typeof mod.selectWorkload,
             calibrateNode: typeof mod.calibrateNode,
-            calibrateClient: typeof mod.calibrateClient
+            calibrateClient: typeof mod.calibrateClient,
+            assess: typeof mod.assess,
+            DEFAULT_RISK_THRESHOLDS: typeof mod.DEFAULT_RISK_THRESHOLDS
           }));
         `,
       ],
@@ -70,6 +74,8 @@ describe('package smoke tests', () => {
       selectWorkload: 'function',
       calibrateNode: 'function',
       calibrateClient: 'function',
+      assess: 'function',
+      DEFAULT_RISK_THRESHOLDS: 'object',
     });
     expect(JSON.parse(cjsOutput)).toEqual({
       createChallenge: 'function',
@@ -77,7 +83,97 @@ describe('package smoke tests', () => {
       selectWorkload: 'function',
       calibrateNode: 'function',
       calibrateClient: 'function',
+      assess: 'function',
+      DEFAULT_RISK_THRESHOLDS: 'object',
     });
+  }, 15000);
+
+  it('exposes risk engine from built artifacts', async () => {
+    const esmOutput = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+          const mod = await import(${JSON.stringify(new URL(`file://${resolve(rootDir, 'dist/index.js')}`).href)});
+          const result = await mod.assess({ signals: { accountAgeSeconds: 10, requestVelocity: 50, userAgent: 'x' } });
+          const viaCustom = await mod.assess({ signals: {}, scorer: { score: async () => 90 } });
+          console.log(JSON.stringify({
+            assessType: typeof mod.assess,
+            defaultThresholds: mod.DEFAULT_RISK_THRESHOLDS,
+            allowAction: (await mod.assess({ signals: {}, scorer: { score: async () => 10 } })).action,
+            challengeHasWorkload: Boolean(result.workload),
+            challengeRisk: result.risk,
+            blockAction: viaCustom.action,
+            blockHasNoWorkload: !viaCustom.workload
+          }));
+        `,
+      ],
+      { cwd: rootDir, encoding: 'utf8' }
+    );
+
+    expect(JSON.parse(esmOutput)).toEqual({
+      assessType: 'function',
+      defaultThresholds: { challenge: 40, block: 80 },
+      allowAction: 'allow',
+      challengeHasWorkload: true,
+      challengeRisk: 70,
+      blockAction: 'block',
+      blockHasNoWorkload: true,
+    });
+
+    const cjsOutput = execFileSync(
+      process.execPath,
+      [
+        '-e',
+        `
+          (async () => {
+            const mod = require(${JSON.stringify(resolve(rootDir, 'dist/cjs/index.js'))});
+            const result = await mod.assess({ signals: { accountAgeSeconds: 10, requestVelocity: 50, userAgent: 'x' } });
+            const viaCustom = await mod.assess({ signals: {}, scorer: { score: async () => 90 } });
+            console.log(JSON.stringify({
+              assessType: typeof mod.assess,
+              defaultThresholds: mod.DEFAULT_RISK_THRESHOLDS,
+              allowAction: (await mod.assess({ signals: {}, scorer: { score: async () => 10 } })).action,
+              challengeHasWorkload: Boolean(result.workload),
+              challengeRisk: result.risk,
+              blockAction: viaCustom.action,
+              blockHasNoWorkload: !viaCustom.workload
+            }));
+          })();
+        `,
+      ],
+      { cwd: rootDir, encoding: 'utf8' }
+    );
+
+    expect(JSON.parse(cjsOutput)).toEqual({
+      assessType: 'function',
+      defaultThresholds: { challenge: 40, block: 80 },
+      allowAction: 'allow',
+      challengeHasWorkload: true,
+      challengeRisk: 70,
+      blockAction: 'block',
+      blockHasNoWorkload: true,
+    });
+  }, 15000);
+
+  it('re-exports risk types from built declarations', () => {
+    requireBuiltDist();
+    const indexDts = readFileSync(resolve(rootDir, 'dist/index.d.ts'), 'utf8');
+    expect(indexDts).toContain('assess');
+    expect(indexDts).toContain('RiskSignals');
+    expect(indexDts).toContain('RiskScorer');
+    expect(indexDts).toContain('RiskThresholds');
+    expect(indexDts).toContain('AssessOptions');
+    expect(indexDts).toContain('RiskAssessment');
+    expect(indexDts).toContain('DEFAULT_RISK_THRESHOLDS');
+
+    const riskDts = readFileSync(resolve(rootDir, 'dist/risk.d.ts'), 'utf8');
+    expect(riskDts).toContain('RiskSignals');
+    expect(riskDts).toContain('defaultScore');
+    expect(riskDts).toContain('normalizeAccountAge');
+    expect(riskDts).toContain('normalizeRequestVelocity');
+    expect(riskDts).toContain('scoreUserAgent');
   });
 
   it('loads browser widget entry points from built artifacts', async () => {

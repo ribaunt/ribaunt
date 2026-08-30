@@ -1,5 +1,23 @@
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import {
+  DEFAULT_RISK_THRESHOLDS,
+  defaultScorer,
+  validateRiskThresholds,
+  validateScorerOutput,
+} from './risk.js';
+import type {
+  AssessOptions,
+  AssessWorkloadOptions,
+  RiskAssessment,
+  RiskScorer,
+  RiskSignals,
+  RiskThresholds,
+} from './risk.js';
+
+// Re-export risk engine public API
+export type { AssessOptions, AssessWorkloadOptions, RiskAssessment, RiskScorer, RiskSignals, RiskThresholds } from './risk.js';
+export { DEFAULT_RISK_THRESHOLDS };
 
 interface ChallengeTokenPayload {
   challenge: string;
@@ -153,7 +171,10 @@ const DEFAULT_BOUNDS = {
   maxDifficulty: 6,
   minAmount: 1,
   maxAmount: 8,
-};
+} as const;
+const MAX_WORKLOAD_DIFFICULTY = 64;
+const MAX_WORKLOAD_AMOUNT = 64;
+const MAX_WORKLOAD_CANDIDATES = 10_000;
 
 function assertFiniteInteger(value: number, name: string, minimum: number): number {
   if (!Number.isFinite(value)) throw new Error(`${name} must be a finite number`);
@@ -191,17 +212,33 @@ function normalizeBounds(options: WorkloadBounds) {
     'Minimum difficulty',
     1
   );
+  if (minDifficulty > MAX_WORKLOAD_DIFFICULTY) {
+    throw new Error(`Minimum difficulty must be at most ${MAX_WORKLOAD_DIFFICULTY}`);
+  }
   const maxDifficulty = assertFiniteInteger(
     options.maxDifficulty ?? DEFAULT_BOUNDS.maxDifficulty,
     'Maximum difficulty',
     minDifficulty
   );
+  if (maxDifficulty > MAX_WORKLOAD_DIFFICULTY) {
+    throw new Error(`Maximum difficulty must be at most ${MAX_WORKLOAD_DIFFICULTY}`);
+  }
   const minAmount = assertFiniteInteger(options.minAmount ?? DEFAULT_BOUNDS.minAmount, 'Minimum amount', 1);
+  if (minAmount > MAX_WORKLOAD_AMOUNT) {
+    throw new Error(`Minimum amount must be at most ${MAX_WORKLOAD_AMOUNT}`);
+  }
   const maxAmount = assertFiniteInteger(
     options.maxAmount ?? DEFAULT_BOUNDS.maxAmount,
     'Maximum amount',
     minAmount
   );
+  if (maxAmount > MAX_WORKLOAD_AMOUNT) {
+    throw new Error(`Maximum amount must be at most ${MAX_WORKLOAD_AMOUNT}`);
+  }
+  const candidateCount = (maxDifficulty - minDifficulty + 1) * (maxAmount - minAmount + 1);
+  if (candidateCount > MAX_WORKLOAD_CANDIDATES) {
+    throw new Error(`Workload bounds too large: candidate count ${candidateCount} exceeds ${MAX_WORKLOAD_CANDIDATES}`);
+  }
   return { minDifficulty, maxDifficulty, minAmount, maxAmount };
 }
 
@@ -249,6 +286,140 @@ export function selectWorkload(options: AdaptiveWorkloadOptions = {}): Workload 
 
   const maximumAttempts = (16 ** bounds.maxDifficulty) * bounds.maxAmount;
   return closestWorkload(Math.min(targetAttempts, maximumAttempts), bounds);
+}
+
+function validateAssessWorkloadOptions(workload: AssessWorkloadOptions): void {
+  // Reuse same validation messages as normalizeBounds / selectWorkload for regression safety
+  if (workload.minDifficulty !== undefined) {
+    assertFiniteInteger(workload.minDifficulty, 'Minimum difficulty', 1);
+  }
+  if (workload.maxDifficulty !== undefined) {
+    // Need to ensure we validate max >= min (using resolved min)
+    const min = workload.minDifficulty !== undefined ? Math.floor(workload.minDifficulty) : DEFAULT_BOUNDS.minDifficulty;
+    assertFiniteInteger(workload.maxDifficulty, 'Maximum difficulty', min);
+  } else if (workload.minDifficulty !== undefined) {
+    // If only minDifficulty provided, still need to ensure default max >= min
+    if (DEFAULT_BOUNDS.maxDifficulty < Math.floor(workload.minDifficulty)) {
+      throw new Error(`Maximum difficulty must be at least ${Math.floor(workload.minDifficulty)}`);
+    }
+  }
+  if (workload.minAmount !== undefined) {
+    assertFiniteInteger(workload.minAmount, 'Minimum amount', 1);
+  }
+  if (workload.maxAmount !== undefined) {
+    const minAmt = workload.minAmount !== undefined ? Math.floor(workload.minAmount) : DEFAULT_BOUNDS.minAmount;
+    assertFiniteInteger(workload.maxAmount, 'Maximum amount', minAmt);
+  } else if (workload.minAmount !== undefined) {
+    if (DEFAULT_BOUNDS.maxAmount < Math.floor(workload.minAmount)) {
+      throw new Error(`Maximum amount must be at least ${Math.floor(workload.minAmount)}`);
+    }
+  }
+  // Cross-check when both are provided, normalizeBounds already checks but we also check explicit ordering
+  // Also need to handle case where both provided but max < min — already caught above with min as floor.
+  // For completeness, if both undefined, no check needed.
+
+  // Validate targetDurationMs
+  if (workload.targetDurationMs !== undefined) {
+    assertFiniteInteger(workload.targetDurationMs, 'Target duration', 1);
+  }
+  // Validate calibration
+  if (workload.calibration !== undefined) {
+    if (!workload.calibration || typeof workload.calibration !== 'object' || Array.isArray(workload.calibration)) {
+      throw new Error('Calibration must be an object');
+    }
+    const cal = workload.calibration as ClientCalibration;
+    assertFiniteInteger(cal.iterations, 'Calibration iterations', 1);
+    assertFiniteInteger(cal.durationMs, 'Calibration duration', 1);
+  }
+  // If any of min/max are provided, also run through normalizeBounds to ensure combined validation matches selectWorkload exactly
+  // This catches edge cases like non-finite values already handled, but ensures parity
+  if (
+    workload.minDifficulty !== undefined ||
+    workload.maxDifficulty !== undefined ||
+    workload.minAmount !== undefined ||
+    workload.maxAmount !== undefined
+  ) {
+    normalizeBounds(workload);
+  }
+}
+
+/**
+ * Programmable risk-assessment subsystem.
+ *
+ * All signals are caller-supplied and treated as untrusted inputs.
+ * The default scorer is a transparent heuristic (not an ML model).
+ * The returned `risk` is a bounded heuristic score, not a probability
+ * or identity confidence. The caller is responsible for obtaining
+ * trustworthy inputs.
+ *
+ * Flow:
+ *   validate AssessOptions
+ *     -> resolve scorer (custom or default)
+ *     -> await scorer.score(signals)
+ *     -> validate risk 0..100
+ *     -> resolve thresholds (custom or DEFAULT_RISK_THRESHOLDS)
+ *     -> apply policy (allow / challenge / block)
+ *     -> if challenge, delegate to existing selectWorkload() with riskScore
+ */
+export async function assess(options: AssessOptions): Promise<RiskAssessment> {
+  if (!options || typeof options !== 'object' || Array.isArray(options)) {
+    throw new Error('AssessOptions must be an object');
+  }
+
+  const { signals, scorer, thresholds, workload } = options as AssessOptions;
+
+  if (!signals || typeof signals !== 'object' || Array.isArray(signals)) {
+    throw new Error('signals must be an object');
+  }
+
+  if (scorer !== undefined) {
+    if (!scorer || typeof scorer !== 'object' || typeof (scorer as RiskScorer).score !== 'function') {
+      throw new Error('scorer must be an object with a score function');
+    }
+  }
+
+  if (thresholds !== undefined) {
+    validateRiskThresholds(thresholds as RiskThresholds);
+  }
+  // Use a private immutable default via copy so consumer mutation of the exported
+  // DEFAULT_RISK_THRESHOLDS cannot change library behavior
+  const resolvedThresholds: RiskThresholds = thresholds
+    ? { challenge: thresholds.challenge, block: thresholds.block }
+    : { challenge: DEFAULT_RISK_THRESHOLDS.challenge, block: DEFAULT_RISK_THRESHOLDS.block };
+  // Validate resolved copy as well (defensive)
+  validateRiskThresholds(resolvedThresholds);
+
+  if (workload !== undefined) {
+    if (!workload || typeof workload !== 'object' || Array.isArray(workload)) {
+      throw new Error('workload must be an object');
+    }
+    validateAssessWorkloadOptions(workload as AssessWorkloadOptions);
+  }
+
+  const activeScorer: RiskScorer = scorer ?? defaultScorer;
+  const rawRisk = await activeScorer.score(signals as RiskSignals);
+  const risk = validateScorerOutput(rawRisk);
+
+  const { challenge, block } = resolvedThresholds;
+  let action: RiskAssessment['action'];
+  if (risk < challenge) action = 'allow';
+  else if (risk < block) action = 'challenge';
+  else action = 'block';
+
+  if (action === 'challenge') {
+    // Reuse existing adaptive workload selection. Do not duplicate logic.
+    // Ensure assessed risk overrides any riskScore that might be present in workload (defensive copy).
+    const workloadOptions: AdaptiveWorkloadOptions = {
+      ...(workload as AdaptiveWorkloadOptions),
+      riskScore: risk,
+    };
+    // Ensure workload's riskScore is overridden even if spread included one
+    workloadOptions.riskScore = risk;
+    const resultWorkload = selectWorkload(workloadOptions);
+    return { risk, action, workload: resultWorkload };
+  }
+
+  return { risk, action };
 }
 
 export function calibrateNode(iterations = 128): ClientCalibration {

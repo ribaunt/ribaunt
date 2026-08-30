@@ -103,6 +103,47 @@ const workload = selectWorkload({
 
 Returns a `Workload` object with `{ difficulty, amount, estimatedAttempts }`. This is the same function `createChallenge()` calls internally when `difficulty` is `"auto"`.
 
+### `assess(options)` — Risk Engine (optional policy layer)
+
+V1 is deliberately small, stateless, and caller-driven. No IP reputation, fingerprinting, or storage is added. See `docs/risk-engine.md` for the full trust model.
+
+```ts
+import { assess, DEFAULT_RISK_THRESHOLDS, type RiskSignals } from 'ribaunt';
+
+const assessment = await assess({
+  signals: {
+    accountAgeSeconds: 3600,
+    requestVelocity: 12, // your own req/min counter
+    userAgent: req.headers['user-agent'],
+    ip: req.ip, // optional — default scorer ignores it
+    tier: 'free', // custom keys allowed via index signature
+  } as RiskSignals,
+  thresholds: { challenge: 40, block: 80 }, // defaults if omitted
+  workload: { minDifficulty: 3, maxDifficulty: 6, targetDurationMs: 750, calibration },
+  scorer: myScorer, // optional — see below
+});
+
+// assessment: { risk: number, action: 'allow' | 'challenge' | 'block', workload?: Workload }
+```
+
+**Semantics:** `risk < challenge → allow`, `challenge ≤ risk < block → challenge`, `risk ≥ block → block`. When `challenge`, `workload` is a reusable `selectWorkload({ riskScore: risk, ...workload })` result. Invalid thresholds (`0 ≤ challenge < block ≤ 100`, finite) are rejected, not repaired. `DEFAULT_RISK_THRESHOLDS` is frozen — mutation does not affect later `assess()` calls (thresholds are copied). `riskScore` inside `workload` is ignored/overridden. Workload bounds are validated with documented upper bounds (`1 ≤ difficulty ≤ 64`, `1 ≤ amount ≤ 64`, candidate count ≤ 10 000) to bound the search before `selectWorkload()` is called.
+
+**Default scorer** (transparent, deterministic, CPU-only, `O(1)`): `age 0–30 + velocity 0–40 + UA 0–10 + ip 0 → clamp 0..100`. Buckets documented in `docs/risk-engine.md` and `src/risk.ts`. Unknown keys are ignored; malformed numbers are ignored; very large values saturate. To change policy, provide a custom `RiskScorer`:
+
+```ts
+import type { RiskScorer } from 'ribaunt';
+const scorer: RiskScorer = {
+  async score(signals) {
+    return signals.isInternal ? 0 : 75;
+  },
+};
+await assess({ signals, scorer });
+```
+
+Custom scorers may be async/remote; errors propagate, and outputs outside finite `0..100` are rejected (not clamped).
+
+**Compatibility:** existing `riskScore` on `createChallenge({ difficulty: 'auto', riskScore: 80 })` stays unchanged. `assess()` is additive — pair `assessment.workload` with `createChallenge({ workload })` or with `riskScore: assessment.risk`. `createChallenge()` never calls `assess()` implicitly.
+
 ## Server-Side: `verifySolution` (async)
 
 `verifySolution()` is asynchronous and supports optional replay-prevention modes.
