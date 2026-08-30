@@ -313,7 +313,7 @@ describe('risk engine - custom scorer usage', () => {
   });
 
   it('supports sync scorer returning number (await unwraps)', async () => {
-    const syncScorer = { score: () => 45 } as unknown as { score: () => Promise<number> };
+    const syncScorer = { score: () => 45 };
     const r = await assess({ signals: {}, scorer: syncScorer });
     expect(r.risk).toBe(45);
     expect(r.action).toBe('challenge');

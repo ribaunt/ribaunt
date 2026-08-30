@@ -23,7 +23,7 @@ export interface RiskSignals {
 }
 
 export interface RiskScorer {
-  score(signals: RiskSignals): Promise<number>;
+  score(signals: RiskSignals): number | Promise<number>;
 }
 
 export interface RiskThresholds {
