@@ -51,7 +51,7 @@ jobs:
             exit 1
           fi
 
-          if exact_version="$(pnpm view "${package_name}@${version}" version --json 2>/tmp/npm-view-exact.log | node -e "let input = ''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(input ? JSON.parse(input) : ''));")"; then
+          if exact_version="$(npm view "${package_name}@${version}" version --json 2>/tmp/npm-view-exact.log | node -e "let input = ''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => console.log(input ? JSON.parse(input) : ''));")"; then
             changed="false"
           elif grep -q "E404" /tmp/npm-view-exact.log; then
             changed="true"
