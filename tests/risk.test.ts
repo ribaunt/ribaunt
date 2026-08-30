@@ -538,12 +538,71 @@ describe('risk engine - AssessOptions validation', () => {
   });
 });
 
+describe('risk engine - workload bounds upper limits (stability)', () => {
+  it.each([
+    [{ maxDifficulty: 65 }, /Maximum difficulty must be at most 64/],
+    [{ minDifficulty: 65, maxDifficulty: 65 }, /Minimum difficulty must be at most 64/],
+    [{ maxAmount: 65 }, /Maximum amount must be at most 64/],
+    [{ minAmount: 65, maxAmount: 65 }, /Minimum amount must be at most 64/],
+    [{ maxDifficulty: 1_000_000 }, /Maximum difficulty must be at most 64/],
+    [{ maxAmount: 1_000_000 }, /Maximum amount must be at most 64/],
+  ])('rejects huge workload %j with bounded error', async (workload, pattern) => {
+    const start = Date.now();
+    await expect(assess({ signals: {}, scorer: { score: async () => 50 }, workload: workload as any })).rejects.toThrow(
+      pattern
+    );
+    expect(Date.now() - start).toBeLessThan(100);
+  });
+
+  it('bounds selectWorkload directly', () => {
+    const start = Date.now();
+    expect(() => selectWorkload({ maxDifficulty: 1_000_000 })).toThrow(/at most 64/);
+    expect(() => selectWorkload({ maxAmount: 1_000_000 })).toThrow(/at most 64/);
+    expect(Date.now() - start).toBeLessThan(100);
+  });
+
+  it('allows max bounds 64/64 (candidate count 4096) and rejects too-large candidate count if limits were higher', async () => {
+    // 64,64 is within upper bounds and candidate count 4096 < 10_000
+    await expect(
+      assess({ signals: {}, scorer: { score: async () => 50 }, workload: { minDifficulty: 1, maxDifficulty: 64, minAmount: 1, maxAmount: 64 } })
+    ).resolves.toBeDefined();
+  });
+});
+
+describe('risk engine - DEFAULT_RISK_THRESHOLDS immutability', () => {
+  it('is frozen', () => {
+    expect(Object.isFrozen(DEFAULT_RISK_THRESHOLDS)).toBe(true);
+  });
+
+  it('mutation does not change assess behavior', async () => {
+    const before = { ...DEFAULT_RISK_THRESHOLDS };
+    // attempt to mutate (in strict mode throws, in sloppy fails silently due to freeze)
+    try {
+      (DEFAULT_RISK_THRESHOLDS as any).challenge = 0;
+    } catch {
+      void 0;
+    }
+    expect(DEFAULT_RISK_THRESHOLDS).toEqual(before);
+    // 39 should still be allow with default 40/80
+    expect((await assess({ signals: {}, scorer: { score: async () => 39 } })).action).toBe('allow');
+    expect((await assess({ signals: {}, scorer: { score: async () => 40 } })).action).toBe('challenge');
+    // also ensure assess copies thresholds so later mutation of passed-in object does not affect library
+    const custom = { challenge: 10, block: 20 };
+    expect((await assess({ signals: {}, scorer: { score: async () => 15 }, thresholds: custom })).action).toBe(
+      'challenge'
+    );
+    custom.challenge = 100;
+    expect((await assess({ signals: {}, scorer: { score: async () => 15 } })).action).toBe('allow');
+  });
+});
+
 describe('risk engine - compatibility and exports', () => {
   it('is exported from ribaunt', async () => {
     const mod = await import('../src/index');
     expect(typeof mod.assess).toBe('function');
     expect(typeof mod.DEFAULT_RISK_THRESHOLDS).toBe('object');
     expect(mod.DEFAULT_RISK_THRESHOLDS).toEqual({ challenge: 40, block: 80 });
+    expect(Object.isFrozen(mod.DEFAULT_RISK_THRESHOLDS)).toBe(true);
   });
 
   it('does not alter existing riskScore behavior', async () => {

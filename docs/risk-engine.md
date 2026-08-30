@@ -126,7 +126,7 @@ const assessment = await assess({
  //   risk >= block                 -> block
 ```
 
-Validation is strict: `0 <= challenge < block <= 100`, finite numbers. Invalid thresholds throw — they are never silently repaired. Tune them to your application; defaults are **policy defaults, not security truth**.
+Validation is strict: `0 <= challenge < block <= 100`, finite numbers. Invalid thresholds throw — they are never silently repaired. Tune them to your application; defaults are **policy defaults, not security truth**. `DEFAULT_RISK_THRESHOLDS` is `Object.freeze`-d — mutating the exported object does not change library behavior; `assess()` copies thresholds internally.
 
 ## Challenge Workload
 
@@ -158,7 +158,7 @@ const assessment = await assess({
 });
 ```
 
-If `workload` contains `riskScore` (via `any`), it is **ignored/overridden** by the assessed `risk`. Workload validation reuses the same messages as `selectWorkload` (`Minimum difficulty must be at least 1`, etc.) — invalid workload is rejected even when `action` would be `allow`/`block` (fail-fast). See `docs/configuration.md` for auto-hardness details.
+If `workload` contains `riskScore` (via `any`), it is **ignored/overridden** by the assessed `risk`. Workload validation reuses the same messages as `selectWorkload` (`Minimum difficulty must be at least 1`, etc.) and enforces documented upper bounds (`1 ≤ difficulty ≤ 64`, `1 ≤ amount ≤ 64`, shared candidate count `(maxD-minD+1)*(maxA-minA+1) ≤ 10 000`) to bound the `closestWorkload()` search before `selectWorkload()` is called — preventing billion-iteration event-loop blocks. Invalid workload is rejected even when `action` would be `allow`/`block` (fail-fast). See `docs/configuration.md` for auto-hardness details.
 
 ## Compatibility
 

@@ -126,7 +126,7 @@ const assessment = await assess({
 // assessment: { risk: number, action: 'allow' | 'challenge' | 'block', workload?: Workload }
 ```
 
-**Semantics:** `risk < challenge → allow`, `challenge ≤ risk < block → challenge`, `risk ≥ block → block`. When `challenge`, `workload` is a reusable `selectWorkload({ riskScore: risk, ...workload })` result. Invalid thresholds (`0 ≤ challenge < block ≤ 100`, finite) are rejected, not repaired. `riskScore` inside `workload` is ignored/overridden.
+**Semantics:** `risk < challenge → allow`, `challenge ≤ risk < block → challenge`, `risk ≥ block → block`. When `challenge`, `workload` is a reusable `selectWorkload({ riskScore: risk, ...workload })` result. Invalid thresholds (`0 ≤ challenge < block ≤ 100`, finite) are rejected, not repaired. `DEFAULT_RISK_THRESHOLDS` is frozen — mutation does not affect later `assess()` calls (thresholds are copied). `riskScore` inside `workload` is ignored/overridden. Workload bounds are validated with documented upper bounds (`1 ≤ difficulty ≤ 64`, `1 ≤ amount ≤ 64`, candidate count ≤ 10 000) to bound the search before `selectWorkload()` is called.
 
 **Default scorer** (transparent, deterministic, CPU-only, `O(1)`): `age 0–30 + velocity 0–40 + UA 0–10 + ip 0 → clamp 0..100`. Buckets documented in `docs/risk-engine.md` and `src/risk.ts`. Unknown keys are ignored; malformed numbers are ignored; very large values saturate. To change policy, provide a custom `RiskScorer`:
 

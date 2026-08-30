@@ -171,7 +171,10 @@ const DEFAULT_BOUNDS = {
   maxDifficulty: 6,
   minAmount: 1,
   maxAmount: 8,
-};
+} as const;
+const MAX_WORKLOAD_DIFFICULTY = 64;
+const MAX_WORKLOAD_AMOUNT = 64;
+const MAX_WORKLOAD_CANDIDATES = 10_000;
 
 function assertFiniteInteger(value: number, name: string, minimum: number): number {
   if (!Number.isFinite(value)) throw new Error(`${name} must be a finite number`);
@@ -209,17 +212,33 @@ function normalizeBounds(options: WorkloadBounds) {
     'Minimum difficulty',
     1
   );
+  if (minDifficulty > MAX_WORKLOAD_DIFFICULTY) {
+    throw new Error(`Minimum difficulty must be at most ${MAX_WORKLOAD_DIFFICULTY}`);
+  }
   const maxDifficulty = assertFiniteInteger(
     options.maxDifficulty ?? DEFAULT_BOUNDS.maxDifficulty,
     'Maximum difficulty',
     minDifficulty
   );
+  if (maxDifficulty > MAX_WORKLOAD_DIFFICULTY) {
+    throw new Error(`Maximum difficulty must be at most ${MAX_WORKLOAD_DIFFICULTY}`);
+  }
   const minAmount = assertFiniteInteger(options.minAmount ?? DEFAULT_BOUNDS.minAmount, 'Minimum amount', 1);
+  if (minAmount > MAX_WORKLOAD_AMOUNT) {
+    throw new Error(`Minimum amount must be at most ${MAX_WORKLOAD_AMOUNT}`);
+  }
   const maxAmount = assertFiniteInteger(
     options.maxAmount ?? DEFAULT_BOUNDS.maxAmount,
     'Maximum amount',
     minAmount
   );
+  if (maxAmount > MAX_WORKLOAD_AMOUNT) {
+    throw new Error(`Maximum amount must be at most ${MAX_WORKLOAD_AMOUNT}`);
+  }
+  const candidateCount = (maxDifficulty - minDifficulty + 1) * (maxAmount - minAmount + 1);
+  if (candidateCount > MAX_WORKLOAD_CANDIDATES) {
+    throw new Error(`Workload bounds too large: candidate count ${candidateCount} exceeds ${MAX_WORKLOAD_CANDIDATES}`);
+  }
   return { minDifficulty, maxDifficulty, minAmount, maxAmount };
 }
 
@@ -362,8 +381,12 @@ export async function assess(options: AssessOptions): Promise<RiskAssessment> {
   if (thresholds !== undefined) {
     validateRiskThresholds(thresholds as RiskThresholds);
   }
-  const resolvedThresholds = thresholds ?? DEFAULT_RISK_THRESHOLDS;
-  // Validate default as well (defensive)
+  // Use a private immutable default via copy so consumer mutation of the exported
+  // DEFAULT_RISK_THRESHOLDS cannot change library behavior
+  const resolvedThresholds: RiskThresholds = thresholds
+    ? { challenge: thresholds.challenge, block: thresholds.block }
+    : { challenge: DEFAULT_RISK_THRESHOLDS.challenge, block: DEFAULT_RISK_THRESHOLDS.block };
+  // Validate resolved copy as well (defensive)
   validateRiskThresholds(resolvedThresholds);
 
   if (workload !== undefined) {

@@ -61,10 +61,12 @@ export interface RiskAssessment {
  *   challenge <= risk < block      -> challenge
  *   risk >= block                 -> block
  */
-export const DEFAULT_RISK_THRESHOLDS: RiskThresholds = {
+const _DEFAULT_RISK_THRESHOLDS: RiskThresholds = Object.freeze({
   challenge: 40,
   block: 80,
-} as const;
+} as const as RiskThresholds);
+
+export const DEFAULT_RISK_THRESHOLDS: RiskThresholds = _DEFAULT_RISK_THRESHOLDS;
 
 // ── Validation helpers ─────────────────────────────────────────────────────
 
