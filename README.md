@@ -16,6 +16,7 @@ Ribaunt is a stateless proof-of-work CAPTCHA library for Node.js and modern brow
 - Browser widget for plain HTML apps
 - React and Next.js-friendly wrapper via `ribaunt/widget-react`
 - Server helpers for creating, solving, and verifying PoW challenges
+- Programmable risk engine (`assess()`) with caller-supplied signals, pluggable scorers, and `allow`/`challenge`/`block` policy
 - Default process-local replay protection with support for remote replay stores
 - CSS custom properties for theming
 - TypeScript types included
@@ -206,8 +207,40 @@ const workload = selectWorkload({
   minDifficulty: 3,
   maxDifficulty: 6,
 });
-// { difficulty: 3, amount: 5, estimatedAttempts: 20480 }
+ // { difficulty: 3, amount: 5, estimatedAttempts: 20480 }
 ```
+
+### `assess(options)` — Risk Engine
+
+ Stateless, caller-driven risk assessment. All signals are caller-supplied (untrusted). Returns a bounded heuristic risk score (0–100, not a probability) and a policy action.
+
+```ts
+import { assess } from 'ribaunt';
+
+const assessment = await assess({
+  signals: {
+    accountAgeSeconds: account.ageSeconds,
+    requestVelocity: requestsPerMinute,
+    userAgent: req.headers['user-agent'],
+    ip: req.ip, // accepted for custom scorers; default scorer ignores it
+  },
+  // thresholds: { challenge: 40, block: 80 }, // defaults shown
+  // scorer: myScorer, // optional pluggable RiskScorer
+  // workload: { minDifficulty: 3, maxDifficulty: 6, targetDurationMs: 750, calibration },
+});
+
+if (assessment.action === 'allow') { /* continue */ }
+else if (assessment.action === 'challenge') {
+  const workload = assessment.workload!; // { difficulty, amount, estimatedAttempts } from selectWorkload()
+}
+else { /* block — application decides how to reject */ }
+```
+
+- `risk < challenge` → `allow` (no workload)
+- `challenge ≤ risk < block` → `challenge` (with workload via existing `selectWorkload()`)
+- `risk ≥ block` → `block` (no workload)
+
+Defaults are `DEFAULT_RISK_THRESHOLDS = { challenge: 40, block: 80 }` — tune to your app; they are policy defaults, not fraud probabilities. Custom scorers (`RiskScorer { score(signals): Promise<number> }`) are `async` so you can call a remote model; invalid outputs (`NaN`/`Infinity`/`<0`/`>100`/non-number) are rejected, not clamped, and thrown errors propagate. See `docs/risk-engine.md` for the full default-scorer buckets, trust model, and limitations.
 
 ### `verifySolution(tokens, solutions, options?)`
 
@@ -363,6 +396,7 @@ See [theming docs](https://github.com/ribaunt/ribaunt/blob/main/docs/theming.md)
 
 - [Quick start](https://github.com/ribaunt/ribaunt/blob/main/docs/quick-start.md)
 - [Configuration](https://github.com/ribaunt/ribaunt/blob/main/docs/configuration.md)
+- [Risk Engine](https://github.com/ribaunt/ribaunt/blob/main/docs/risk-engine.md)
 - [Events](https://github.com/ribaunt/ribaunt/blob/main/docs/events.md)
 - [HTML integration](https://github.com/ribaunt/ribaunt/blob/main/docs/integrations/html.md)
 - [React integration](https://github.com/ribaunt/ribaunt/blob/main/docs/integrations/react.md)
