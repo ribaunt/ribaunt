@@ -19,12 +19,33 @@ import type {
 export type { AssessOptions, AssessWorkloadOptions, RiskAssessment, RiskScorer, RiskSignals, RiskThresholds } from './risk.js';
 export { DEFAULT_RISK_THRESHOLDS };
 
+export type PowAlgorithm = 'sha256' | 'argon2id';
+
+export type ArgonProfile = 'mobile' | 'standard';
+
+export const HARD_MAX = {
+  m: 32 * 1024,
+  t: 3,
+  p: 1,
+  hashLen: 32,
+} as const;
+
+export const ARGON_PROFILES: Record<ArgonProfile, { m: number; t: number; p: number; hashLen: number }> = {
+  mobile: { m: 8 * 1024, t: 1, p: 1, hashLen: 32 },
+  standard: { m: 8 * 1024, t: 1, p: 1, hashLen: 32 },
+};
+
 interface ChallengeTokenPayload {
   challenge: string;
   difficulty: number;
   expires: number;
   jti?: string;
   contextHash?: string;
+  alg?: PowAlgorithm;
+  m?: number;
+  t?: number;
+  p?: number;
+  hashLen?: number;
 }
 
 export type ChallengeToken = string;
@@ -50,12 +71,16 @@ export interface AdaptiveWorkloadOptions extends WorkloadBounds {
   riskScore?: number;
   targetDurationMs?: number;
   calibration?: ClientCalibration;
+  algorithm?: PowAlgorithm;
+  argonProfile?: ArgonProfile;
 }
 
 export interface Workload {
   difficulty: number;
   amount: number;
   estimatedAttempts: number;
+  algorithm: PowAlgorithm;
+  argon?: { m: number; t: number; p: number; hashLen: number };
 }
 
 export interface ChallengeOptions {
@@ -73,6 +98,8 @@ export interface ChallengeOptions {
   maxAmount?: number;
   rateLimiter?: RateLimiter;
   onEvent?: (event: RibauntEvent) => void;
+  algorithm?: PowAlgorithm;
+  argonProfile?: ArgonProfile;
 }
 
 export interface ReplayStore {
@@ -123,7 +150,7 @@ export interface VerifyWarning {
 }
 
 export type RibauntEvent =
-  | { type: 'challenge-issued'; difficulty: number; amount: number }
+  | { type: 'challenge-issued'; difficulty: number; amount: number; algorithm?: PowAlgorithm }
   | { type: 'verify-success' }
   | { type: 'verify-failure'; reason: VerifyFailureReason; message: string };
 
@@ -172,9 +199,71 @@ const DEFAULT_BOUNDS = {
   minAmount: 1,
   maxAmount: 8,
 } as const;
+const DEFAULT_BOUNDS_SHA = DEFAULT_BOUNDS;
+const DEFAULT_BOUNDS_ARGON = {
+  minDifficulty: 1,
+  maxDifficulty: 2,
+  minAmount: 1,
+  maxAmount: 8,
+} as const;
 const MAX_WORKLOAD_DIFFICULTY = 64;
+const MAX_WORKLOAD_ARGON_DIFFICULTY = 8;
 const MAX_WORKLOAD_AMOUNT = 64;
 const MAX_WORKLOAD_CANDIDATES = 10_000;
+
+// Lazy argon2id provider (hash-wasm)
+type Argon2idFn = (opts: { password: string; salt: string; parallelism: number; iterations: number; memorySize: number; hashLength: number; outputType: 'hex' | 'binary' | 'encoded' }) => Promise<string>;
+let cachedArgon2id: Argon2idFn | null = null;
+let argon2idLoadPromise: Promise<Argon2idFn> | null = null;
+
+async function getArgon2idFn(): Promise<Argon2idFn> {
+  if (cachedArgon2id) return cachedArgon2id;
+  if (argon2idLoadPromise) return argon2idLoadPromise;
+  argon2idLoadPromise = (async () => {
+    // hash-wasm is CJS; handle both default and named interop
+    const mod: unknown = await import('hash-wasm');
+    const pkg = (mod as { default?: unknown }).default ?? mod;
+    const fn = (pkg as { argon2id?: Argon2idFn }).argon2id;
+    if (typeof fn !== 'function') throw new Error('hash-wasm argon2id not available');
+    cachedArgon2id = fn;
+    return fn;
+  })();
+  return argon2idLoadPromise;
+}
+
+function padSalt(challenge: string): string {
+  if (challenge.length >= 16) return challenge.slice(0, 16);
+  return challenge.padEnd(16, '0');
+}
+
+function resolveArgonParams(profile?: ArgonProfile): { m: number; t: number; p: number; hashLen: number } {
+  const normalized: ArgonProfile = profile ?? 'mobile';
+  if (normalized !== 'mobile' && normalized !== 'standard') {
+    throw new Error('argonProfile must be "mobile" or "standard"');
+  }
+  return ARGON_PROFILES[normalized];
+}
+
+async function argon2idHash(challenge: string, nonce: number | string, params: { m: number; t: number; p: number; hashLen: number }): Promise<string> {
+  const argon2id = await getArgon2idFn();
+  const salt = padSalt(challenge);
+  const password = `${challenge}${String(nonce)}`;
+  return argon2id({
+    password,
+    salt,
+    parallelism: params.p,
+    iterations: params.t,
+    memorySize: params.m,
+    hashLength: params.hashLen,
+    outputType: 'hex',
+  });
+}
+
+function assertAlgorithm(value: unknown): PowAlgorithm {
+  if (value === undefined) return 'sha256';
+  if (value === 'sha256' || value === 'argon2id') return value;
+  throw new Error('algorithm must be "sha256" or "argon2id"');
+}
 
 function assertFiniteInteger(value: number, name: string, minimum: number): number {
   if (!Number.isFinite(value)) throw new Error(`${name} must be a finite number`);
@@ -186,17 +275,26 @@ function assertFiniteInteger(value: number, name: string, minimum: number): numb
 function isValidPayload(payload: unknown): payload is ChallengeTokenPayload {
   if (!payload || typeof payload !== 'object') return false;
   const value = payload as Partial<ChallengeTokenPayload>;
-  return typeof value.challenge === 'string'
-    && value.challenge.length > 0
-    && typeof value.difficulty === 'number'
-    && Number.isInteger(value.difficulty)
-    && value.difficulty >= 1
-    && value.difficulty <= 64
-    && typeof value.expires === 'number'
-    && Number.isInteger(value.expires)
-    && typeof value.jti === 'string'
-    && value.jti.length > 0
-    && (value.contextHash === undefined || /^[a-f0-9]{64}$/.test(value.contextHash));
+  if (typeof value.challenge !== 'string' || value.challenge.length === 0) return false;
+  if (typeof value.difficulty !== 'number' || !Number.isInteger(value.difficulty) || value.difficulty < 1) return false;
+  const alg = (value.alg ?? 'sha256') as PowAlgorithm;
+  if (alg === 'argon2id') {
+    if (value.difficulty > MAX_WORKLOAD_ARGON_DIFFICULTY) return false;
+    if (typeof value.m !== 'number' || !Number.isInteger(value.m) || value.m < 8 || value.m > HARD_MAX.m) return false;
+    if (typeof value.t !== 'number' || !Number.isInteger(value.t) || value.t < 1 || value.t > HARD_MAX.t) return false;
+    if (typeof value.p !== 'number' || !Number.isInteger(value.p) || value.p < 1 || value.p > HARD_MAX.p) return false;
+    if (value.hashLen !== undefined && value.hashLen !== 32) return false;
+    // enforce at least pow of two? not needed
+  } else if (alg === 'sha256') {
+    if (value.difficulty > MAX_WORKLOAD_DIFFICULTY) return false;
+    if (value.m !== undefined || value.t !== undefined || value.p !== undefined || value.hashLen !== undefined) return false;
+  } else {
+    return false;
+  }
+  if (typeof value.expires !== 'number' || !Number.isInteger(value.expires)) return false;
+  if (typeof value.jti !== 'string' || value.jti.length === 0) return false;
+  if (value.contextHash !== undefined && !/^[a-f0-9]{64}$/.test(value.contextHash)) return false;
+  return true;
 }
 
 function assertRange(value: number, name: string, minimum: number, maximum: number): number {
@@ -206,29 +304,46 @@ function assertRange(value: number, name: string, minimum: number, maximum: numb
   return value;
 }
 
-function normalizeBounds(options: WorkloadBounds) {
+function getDefaultBounds(algorithm: PowAlgorithm): { minDifficulty: number; maxDifficulty: number; minAmount: number; maxAmount: number } {
+  return algorithm === 'argon2id' ? DEFAULT_BOUNDS_ARGON : DEFAULT_BOUNDS_SHA;
+}
+
+function getMaxDifficulty(algorithm: PowAlgorithm): number {
+  return algorithm === 'argon2id' ? MAX_WORKLOAD_ARGON_DIFFICULTY : MAX_WORKLOAD_DIFFICULTY;
+}
+
+function normalizeBounds(options: WorkloadBounds): ReturnType<typeof normalizeBoundsInternal>;
+function normalizeBounds(options: WorkloadBounds & { algorithm?: PowAlgorithm }): ReturnType<typeof normalizeBoundsInternal>;
+function normalizeBounds(options: WorkloadBounds & { algorithm?: PowAlgorithm }) {
+  const algorithm = assertAlgorithm((options as { algorithm?: unknown }).algorithm);
+  return normalizeBoundsInternal(options, algorithm);
+}
+
+function normalizeBoundsInternal(options: WorkloadBounds, algorithm: PowAlgorithm = 'sha256') {
+  const defaults = getDefaultBounds(algorithm);
+  const maxDiff = getMaxDifficulty(algorithm);
   const minDifficulty = assertFiniteInteger(
-    options.minDifficulty ?? DEFAULT_BOUNDS.minDifficulty,
+    options.minDifficulty ?? defaults.minDifficulty,
     'Minimum difficulty',
     1
   );
-  if (minDifficulty > MAX_WORKLOAD_DIFFICULTY) {
-    throw new Error(`Minimum difficulty must be at most ${MAX_WORKLOAD_DIFFICULTY}`);
+  if (minDifficulty > maxDiff) {
+    throw new Error(`Minimum difficulty must be at most ${maxDiff}`);
   }
   const maxDifficulty = assertFiniteInteger(
-    options.maxDifficulty ?? DEFAULT_BOUNDS.maxDifficulty,
+    options.maxDifficulty ?? defaults.maxDifficulty,
     'Maximum difficulty',
     minDifficulty
   );
-  if (maxDifficulty > MAX_WORKLOAD_DIFFICULTY) {
-    throw new Error(`Maximum difficulty must be at most ${MAX_WORKLOAD_DIFFICULTY}`);
+  if (maxDifficulty > maxDiff) {
+    throw new Error(`Maximum difficulty must be at most ${maxDiff}`);
   }
-  const minAmount = assertFiniteInteger(options.minAmount ?? DEFAULT_BOUNDS.minAmount, 'Minimum amount', 1);
+  const minAmount = assertFiniteInteger(options.minAmount ?? defaults.minAmount, 'Minimum amount', 1);
   if (minAmount > MAX_WORKLOAD_AMOUNT) {
     throw new Error(`Minimum amount must be at most ${MAX_WORKLOAD_AMOUNT}`);
   }
   const maxAmount = assertFiniteInteger(
-    options.maxAmount ?? DEFAULT_BOUNDS.maxAmount,
+    options.maxAmount ?? defaults.maxAmount,
     'Maximum amount',
     minAmount
   );
@@ -239,12 +354,15 @@ function normalizeBounds(options: WorkloadBounds) {
   if (candidateCount > MAX_WORKLOAD_CANDIDATES) {
     throw new Error(`Workload bounds too large: candidate count ${candidateCount} exceeds ${MAX_WORKLOAD_CANDIDATES}`);
   }
-  return { minDifficulty, maxDifficulty, minAmount, maxAmount };
+  return { minDifficulty, maxDifficulty, minAmount, maxAmount, algorithm };
 }
 
-function closestWorkload(targetAttempts: number, bounds: ReturnType<typeof normalizeBounds>): Workload {
+function closestWorkload(targetAttempts: number, bounds: ReturnType<typeof normalizeBoundsInternal>): Workload {
   let best: Workload | undefined;
   let bestDistance = Number.POSITIVE_INFINITY;
+
+  const algorithm = (bounds as { algorithm?: PowAlgorithm }).algorithm ?? 'sha256';
+  const argon = algorithm === 'argon2id' ? resolveArgonParams((bounds as unknown as { argonProfile?: ArgonProfile }).argonProfile) : undefined;
 
   for (let difficulty = bounds.minDifficulty; difficulty <= bounds.maxDifficulty; difficulty++) {
     for (let amount = bounds.minAmount; amount <= bounds.maxAmount; amount++) {
@@ -252,7 +370,11 @@ function closestWorkload(targetAttempts: number, bounds: ReturnType<typeof norma
       const distance = Math.abs(Math.log(estimatedAttempts / targetAttempts));
       if (distance < bestDistance) {
         bestDistance = distance;
-        best = { difficulty, amount, estimatedAttempts };
+        if (algorithm === 'argon2id') {
+          best = { difficulty, amount, estimatedAttempts, algorithm, argon: argon! };
+        } else {
+          best = { difficulty, amount, estimatedAttempts, algorithm };
+        }
       }
     }
   }
@@ -262,9 +384,27 @@ function closestWorkload(targetAttempts: number, bounds: ReturnType<typeof norma
 
 /**
  * Selects bounded proof-of-work using a server-owned risk floor and untrusted timing calibration.
+ * For `algorithm:'argon2id'` difficulty is capped to the argon max (default 2) and the returned
+ * workload carries `argon:{m,t,p}` derived from `argonProfile` so the device can comfortably solve it.
  */
 export function selectWorkload(options: AdaptiveWorkloadOptions = {}): Workload {
-  const bounds = normalizeBounds(options);
+  const algorithm = assertAlgorithm((options as { algorithm?: unknown }).algorithm);
+  if (options.argonProfile !== undefined) {
+    if (algorithm !== 'argon2id') throw new Error('argonProfile is only valid when algorithm is "argon2id"');
+    if (options.argonProfile !== 'mobile' && options.argonProfile !== 'standard') {
+      throw new Error('argonProfile must be "mobile" or "standard"');
+    }
+  }
+  // Validate argonProfile early
+  if (algorithm === 'argon2id') {
+    // Trigger validation (defaults to mobile when undefined)
+    resolveArgonParams(options.argonProfile);
+  }
+  const bounds = normalizeBounds({ ...options, algorithm } as WorkloadBounds & { algorithm?: PowAlgorithm }) as ReturnType<typeof normalizeBoundsInternal> & { argonProfile?: ArgonProfile };
+  // Carry argonProfile through bounds object for closestWorkload to consume (without polluting validation)
+  if (algorithm === 'argon2id' && options.argonProfile !== undefined) {
+    (bounds as unknown as { argonProfile?: ArgonProfile }).argonProfile = options.argonProfile;
+  }
   const riskScore = assertRange(options.riskScore ?? 50, 'Risk score', 0, 100);
   const targetDurationMs = assertFiniteInteger(
     options.targetDurationMs ?? 750,
@@ -285,32 +425,51 @@ export function selectWorkload(options: AdaptiveWorkloadOptions = {}): Workload 
   }
 
   const maximumAttempts = (16 ** bounds.maxDifficulty) * bounds.maxAmount;
-  return closestWorkload(Math.min(targetAttempts, maximumAttempts), bounds);
+  const workload = closestWorkload(Math.min(targetAttempts, maximumAttempts), bounds);
+  // Ensure argon carries profile-resolved params if not already via closestWorkload
+  if (algorithm === 'argon2id' && !workload.argon) {
+    workload.argon = resolveArgonParams(options.argonProfile);
+  }
+  return workload;
 }
 
 function validateAssessWorkloadOptions(workload: AssessWorkloadOptions): void {
+  const alg = assertAlgorithm((workload as { algorithm?: unknown }).algorithm);
+  const defaults = getDefaultBounds(alg);
+  const maxDiffForAlg = getMaxDifficulty(alg);
   // Reuse same validation messages as normalizeBounds / selectWorkload for regression safety
   if (workload.minDifficulty !== undefined) {
     assertFiniteInteger(workload.minDifficulty, 'Minimum difficulty', 1);
+    if (Math.floor(workload.minDifficulty) > maxDiffForAlg) {
+      throw new Error(`Minimum difficulty must be at most ${maxDiffForAlg}`);
+    }
   }
   if (workload.maxDifficulty !== undefined) {
     // Need to ensure we validate max >= min (using resolved min)
-    const min = workload.minDifficulty !== undefined ? Math.floor(workload.minDifficulty) : DEFAULT_BOUNDS.minDifficulty;
+    const min = workload.minDifficulty !== undefined ? Math.floor(workload.minDifficulty) : defaults.minDifficulty;
     assertFiniteInteger(workload.maxDifficulty, 'Maximum difficulty', min);
+    if (Math.floor(workload.maxDifficulty) > maxDiffForAlg) {
+      throw new Error(`Maximum difficulty must be at most ${maxDiffForAlg}`);
+    }
   } else if (workload.minDifficulty !== undefined) {
     // If only minDifficulty provided, still need to ensure default max >= min
-    if (DEFAULT_BOUNDS.maxDifficulty < Math.floor(workload.minDifficulty)) {
+    if (defaults.maxDifficulty < Math.floor(workload.minDifficulty)) {
       throw new Error(`Maximum difficulty must be at least ${Math.floor(workload.minDifficulty)}`);
     }
+  }
+  if ((workload as { argonProfile?: unknown }).argonProfile !== undefined) {
+    const p = (workload as { argonProfile?: unknown }).argonProfile;
+    if (alg !== 'argon2id') throw new Error('argonProfile is only valid when algorithm is "argon2id"');
+    if (p !== 'mobile' && p !== 'standard') throw new Error('argonProfile must be "mobile" or "standard"');
   }
   if (workload.minAmount !== undefined) {
     assertFiniteInteger(workload.minAmount, 'Minimum amount', 1);
   }
   if (workload.maxAmount !== undefined) {
-    const minAmt = workload.minAmount !== undefined ? Math.floor(workload.minAmount) : DEFAULT_BOUNDS.minAmount;
+    const minAmt = workload.minAmount !== undefined ? Math.floor(workload.minAmount) : defaults.minAmount;
     assertFiniteInteger(workload.maxAmount, 'Maximum amount', minAmt);
   } else if (workload.minAmount !== undefined) {
-    if (DEFAULT_BOUNDS.maxAmount < Math.floor(workload.minAmount)) {
+    if (defaults.maxAmount < Math.floor(workload.minAmount)) {
       throw new Error(`Maximum amount must be at least ${Math.floor(workload.minAmount)}`);
     }
   }
@@ -337,9 +496,14 @@ function validateAssessWorkloadOptions(workload: AssessWorkloadOptions): void {
     workload.minDifficulty !== undefined ||
     workload.maxDifficulty !== undefined ||
     workload.minAmount !== undefined ||
-    workload.maxAmount !== undefined
+    workload.maxAmount !== undefined ||
+    (workload as { algorithm?: unknown }).algorithm !== undefined ||
+    (workload as { argonProfile?: unknown }).argonProfile !== undefined
   ) {
-    normalizeBounds(workload);
+    normalizeBounds(workload as WorkloadBounds & { algorithm?: PowAlgorithm });
+  }
+  if ((workload as { algorithm?: unknown }).algorithm !== undefined) {
+    assertAlgorithm((workload as { algorithm?: unknown }).algorithm);
   }
 }
 
@@ -441,6 +605,63 @@ export function calibrateNode(iterations = 128): ClientCalibration {
 
 export const calibrateClient = calibrateNode;
 
+let cachedArgonCalibrationWarmup: Promise<void> | null = null;
+async function ensureArgonWarmup(): Promise<void> {
+  if (cachedArgonCalibrationWarmup) return cachedArgonCalibrationWarmup;
+  // Warm up WASM once (first argon hash triggers compilation)
+  cachedArgonCalibrationWarmup = (async () => {
+    try {
+      await getArgon2idFn();
+      // tiny probe to force WASM compile — one hash at mobile params
+      const argon = await getArgon2idFn();
+      await argon({
+        password: 'ribaunt-warmup',
+        salt: 'ribaunt-warmup-16b',
+        parallelism: 1,
+        iterations: 1,
+        memorySize: 8 * 1024,
+        hashLength: 32,
+        outputType: 'hex',
+      });
+    } catch {
+      // warmup best-effort; calibration will still surface errors
+    }
+  })();
+  return cachedArgonCalibrationWarmup;
+}
+
+/**
+ * Calibrate Argon2id on Node — measures device speed for the memory-hard algorithm.
+ * Uses a smaller iteration default (16) because each hash is ~6ms (mobile) vs microseconds for SHA.
+ * The returned shape is identical to `calibrateNode()` so `selectWorkload({calibration, algorithm:'argon2id'})` can consume it.
+ * Keep SHA `calibrateNode()` for `algorithm:'sha256'` — mismatched calibration will over/under-estimate.
+ */
+export async function calibrateArgonNode(iterations = 16): Promise<ClientCalibration> {
+  if (!Number.isFinite(iterations) || iterations < 1) {
+    throw new Error('Calibration iterations must be at least 1');
+  }
+  const normalizedIterations = Math.floor(iterations);
+  await ensureArgonWarmup();
+  const profile = resolveArgonParams('mobile');
+  const startedAt = performance.now();
+  for (let index = 0; index < normalizedIterations; index++) {
+    await argon2idHash(`ribaunt-calibration:${index}`, '0', profile);
+  }
+  return {
+    iterations: normalizedIterations,
+    durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
+  };
+}
+
+export const calibrateArgonClient = calibrateArgonNode;
+
+// Test helpers — not part of public API surface but exported for bench / testing
+export function __resetArgonForTesting(): void {
+  cachedArgon2id = null;
+  argon2idLoadPromise = null;
+  cachedArgonCalibrationWarmup = null;
+}
+
 function generateChallenge(length = 8): string {
   return crypto.randomBytes(length).toString('base64url').slice(0, length);
 }
@@ -468,7 +689,9 @@ function getSecret(): string {
 function createSingleChallenge(
   difficulty: number,
   ttlSeconds: number,
-  context?: string
+  context?: string,
+  algorithm: PowAlgorithm = 'sha256',
+  argonParams?: { m: number; t: number; p: number; hashLen: number }
 ): ChallengeToken {
   const jti = crypto.randomUUID();
   const payload: ChallengeTokenPayload = {
@@ -477,6 +700,21 @@ function createSingleChallenge(
     expires: Math.floor(Date.now() / 1000) + ttlSeconds,
     jti,
   };
+  if (algorithm === 'argon2id') {
+    payload.alg = 'argon2id';
+    const p = argonParams ?? resolveArgonParams('mobile');
+    payload.m = p.m;
+    payload.t = p.t;
+    payload.p = p.p;
+    payload.hashLen = p.hashLen;
+    if (difficulty < 1 || difficulty > MAX_WORKLOAD_ARGON_DIFFICULTY) {
+      throw new Error(`Challenge difficulty must be between 1 and ${MAX_WORKLOAD_ARGON_DIFFICULTY} for argon2id`);
+    }
+  } else {
+    if (difficulty < 1 || difficulty > MAX_WORKLOAD_DIFFICULTY) {
+      throw new Error(`Challenge difficulty must be at most ${MAX_WORKLOAD_DIFFICULTY}`);
+    }
+  }
   if (context !== undefined) payload.contextHash = hashContext(context, jti);
   return jwt.sign(payload, getSecret(), { algorithm: 'HS256' });
 }
@@ -505,16 +743,51 @@ export async function createChallenge(
   ttlSeconds = 30
 ): Promise<ChallengeToken[]> {
   const options = typeof difficultyOrOptions === 'object' ? difficultyOrOptions : undefined;
-  const selectedWorkload = options?.workload
-    ?? (options?.difficulty === 'auto' ? selectWorkload(options) : undefined);
+  const algorithm: PowAlgorithm = assertAlgorithm(options?.algorithm);
+  if (options?.argonProfile !== undefined && algorithm !== 'argon2id') {
+    throw new Error('argonProfile is only valid when algorithm is "argon2id"');
+  }
+  let selectedWorkload: Workload | undefined;
+  if (options?.workload) {
+    const w = options.workload as { difficulty: number; amount: number };
+    const wDiff = assertFiniteInteger(w.difficulty, 'Challenge difficulty', 1);
+    const maxForAlg = getMaxDifficulty(algorithm);
+    if (wDiff > maxForAlg) throw new Error(`Challenge difficulty must be at most ${maxForAlg} for ${algorithm}`);
+    const wAmount = assertFiniteInteger(w.amount, 'Challenge amount', 1);
+    selectedWorkload = {
+      difficulty: wDiff,
+      amount: wAmount,
+      estimatedAttempts: (16 ** wDiff) * wAmount,
+      algorithm,
+      ...(algorithm === 'argon2id' ? { argon: resolveArgonParams(options.argonProfile) } : {}),
+    } as Workload;
+  } else if (options?.difficulty === 'auto') {
+    const workloadInput: AdaptiveWorkloadOptions = {
+      ...(options as AdaptiveWorkloadOptions),
+      algorithm,
+      ...(options.argonProfile !== undefined ? { argonProfile: options.argonProfile } : {}),
+    };
+    selectedWorkload = selectWorkload(workloadInput);
+  }
+  // When algorithm is argon2id and workload was explicit or auto, resolve argon params for token
+  let workloadArgon: { m: number; t: number; p: number; hashLen: number } | undefined;
+  if (algorithm === 'argon2id') {
+    if (selectedWorkload?.argon) {
+      workloadArgon = selectedWorkload.argon;
+    } else {
+      workloadArgon = resolveArgonParams(options?.argonProfile);
+    }
+  }
   const configuredDifficulty = options?.difficulty === 'auto' ? undefined : options?.difficulty;
+  const difficultyRaw = selectedWorkload?.difficulty ?? configuredDifficulty
+      ?? (typeof difficultyOrOptions === 'number' ? difficultyOrOptions : 5);
   const difficulty = assertFiniteInteger(
-    selectedWorkload?.difficulty ?? configuredDifficulty
-      ?? (typeof difficultyOrOptions === 'number' ? difficultyOrOptions : 5),
+    difficultyRaw,
     'Challenge difficulty',
     1
   );
-  if (difficulty > 64) throw new Error('Challenge difficulty must be at most 64');
+  const maxForAlg = getMaxDifficulty(algorithm);
+  if (difficulty > maxForAlg) throw new Error(`Challenge difficulty must be at most ${maxForAlg} for ${algorithm}`);
   const normalizedAmount = assertFiniteInteger(
     selectedWorkload?.amount ?? options?.amount ?? (options ? 1 : amount),
     'Challenge amount',
@@ -533,9 +806,13 @@ export async function createChallenge(
 
   const challenges = Array.from(
     { length: normalizedAmount },
-    () => createSingleChallenge(difficulty, normalizedTtl, options?.context)
+    () => createSingleChallenge(difficulty, normalizedTtl, options?.context, algorithm, workloadArgon)
   );
-  emitEvent(options, { type: 'challenge-issued', difficulty, amount: normalizedAmount });
+  if (algorithm === 'argon2id') {
+    emitEvent(options, { type: 'challenge-issued', difficulty, amount: normalizedAmount, algorithm });
+  } else {
+    emitEvent(options, { type: 'challenge-issued', difficulty, amount: normalizedAmount });
+  }
   return challenges;
 }
 
@@ -558,6 +835,9 @@ function solveSingleChallenge(
   try {
     const payload = jwt.decode(token) as ChallengeTokenPayload | null;
     if (!payload) return undefined;
+    // Sync solver only supports sha256; argon2id requires async path
+    const alg = (payload as ChallengeTokenPayload).alg ?? 'sha256';
+    if (alg === 'argon2id') return undefined;
     const prefix = '0'.repeat(payload.difficulty);
     const maxIterations = normalizeMaxIterations(options);
     const maxDurationMs = normalizeMaxDurationMs(options);
@@ -590,6 +870,67 @@ export function solveChallenge(
     return solutions;
   }
   return solveSingleChallenge(token, options);
+}
+
+async function solveSingleChallengeAsync(
+  token: ChallengeToken,
+  options?: SolveChallengeOptions
+): Promise<ChallengeSolution | undefined> {
+  try {
+    const payload = jwt.decode(token) as ChallengeTokenPayload | null;
+    if (!payload) return undefined;
+    const alg = payload.alg ?? 'sha256';
+    const prefix = '0'.repeat(payload.difficulty);
+    const maxIterations = normalizeMaxIterations(options);
+    const maxDurationMs = normalizeMaxDurationMs(options);
+    const startedAt = Date.now();
+
+    if (alg === 'argon2id') {
+      const params = {
+        m: payload.m ?? HARD_MAX.m,
+        t: payload.t ?? 1,
+        p: payload.p ?? 1,
+        hashLen: payload.hashLen ?? 32,
+      };
+      // Validate params match token (already validated by isValidPayload, but double-check)
+      if (params.m > HARD_MAX.m || params.t > HARD_MAX.t || params.p > HARD_MAX.p) return undefined;
+      for (let nonce = 0; ; nonce++) {
+        if (maxIterations !== undefined && nonce >= maxIterations) return undefined;
+        if (Date.now() - startedAt >= maxDurationMs) return undefined;
+        const hash = await argon2idHash(payload.challenge, nonce, params);
+        if (hash.startsWith(prefix)) return { nonce: String(nonce), hash };
+        // Cooperative yield every 1 iteration for argon (hash is already ~6ms, but allow abort checks)
+        if (nonce % 1 === 0) await new Promise<void>(r => setTimeout(r, 0));
+      }
+    } else {
+      for (let nonce = 0; ; nonce++) {
+        if (maxIterations !== undefined && nonce >= maxIterations) return undefined;
+        if (Date.now() - startedAt >= maxDurationMs) return undefined;
+        const hash = crypto.createHash('sha256').update(`${payload.challenge}${nonce}`).digest('hex');
+        if (hash.startsWith(prefix)) return { nonce: String(nonce), hash };
+      }
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+export async function solveChallengeAsync(token: ChallengeToken, options?: SolveChallengeOptions): Promise<ChallengeSolution | undefined>;
+export async function solveChallengeAsync(token: ChallengeToken[], options?: SolveChallengeOptions): Promise<ChallengeSolution[] | undefined>;
+export async function solveChallengeAsync(
+  token: ChallengeToken | ChallengeToken[],
+  options?: SolveChallengeOptions
+): Promise<ChallengeSolution | ChallengeSolution[] | undefined> {
+  if (Array.isArray(token)) {
+    const solutions: ChallengeSolution[] = [];
+    for (const item of token) {
+      const solution = await solveSingleChallengeAsync(item, options);
+      if (!solution) return undefined;
+      solutions.push(solution);
+    }
+    return solutions;
+  }
+  return solveSingleChallengeAsync(token, options);
 }
 
 function shouldDebug(options?: VerifySolutionOptions): boolean {
@@ -700,10 +1041,26 @@ export async function verifySolution(
         return warn('context-mismatch', 'verifySolution rejected a mismatched challenge context', options);
       }
 
-      const hash = crypto
-        .createHash('sha256')
-        .update(`${payload.challenge}${String(currentNonce)}`)
-        .digest('hex');
+      const alg = payload.alg ?? 'sha256';
+      let hash: string;
+      if (alg === 'argon2id') {
+        const params = {
+          m: payload.m ?? HARD_MAX.m,
+          t: payload.t ?? 1,
+          p: payload.p ?? 1,
+          hashLen: payload.hashLen ?? 32,
+        };
+        // Strict validation — tokens with out-of-bounds params already rejected by isValidPayload, but double-check for safety
+        if (params.m < 8 || params.m > HARD_MAX.m || params.t < 1 || params.t > HARD_MAX.t || params.p < 1 || params.p > HARD_MAX.p) {
+          return warn('invalid-token', 'verifySolution rejected an invalid argon2id token', options);
+        }
+        hash = await argon2idHash(payload.challenge, currentNonce, params);
+      } else {
+        hash = crypto
+          .createHash('sha256')
+          .update(`${payload.challenge}${String(currentNonce)}`)
+          .digest('hex');
+      }
       if (!hash.startsWith('0'.repeat(payload.difficulty))) {
         return warn('invalid-solution', 'verifySolution rejected an invalid nonce', options);
       }

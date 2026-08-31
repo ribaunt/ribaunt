@@ -12,7 +12,7 @@ export type {
   WidgetStateDetail,
   WidgetVerifyDetail,
 } from './widget.js';
-export { calibrateBrowser, calibrateClient, type ChallengeSolution } from './solver.js';
+export { calibrateBrowser, calibrateClient, calibrateArgonBrowser, calibrateArgonClient, type ChallengeSolution } from './solver.js';
 
 // Auto-register the widget when imported
 import './widget.js';

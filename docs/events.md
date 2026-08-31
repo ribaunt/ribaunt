@@ -99,12 +99,12 @@ If you use the React wrapper (`ribaunt/widget-react`), you get built-in strongly
 
 - **`onEvent`**: Fires for all events with the event type (`'verify'`, `'error'`, `'state-change'`, `'solver-backend'`, or `'ready'`) and its detail. This is a catch-all handler that can be used instead of individual callbacks.
 
-The React wrapper also syncs all widget props after mount, including `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `challengeMethod`, `calibrate`, `showWarning`, `warningMessage`, `solveTimeout`, `showProgress`, `workerMode`, `wasmMode`, and `disabled`.
+The React wrapper also syncs all widget props after mount, including `challengeEndpoint`, `verifyEndpoint`, `autoVerify`, `challengeMethod`, `calibrate`, `showWarning`, `warningMessage`, `solveTimeout`, `showProgress`, `workerMode`, `wasmMode`, and `disabled`. `solver-backend` now also emits `argon2id` for memory-hard challenges (worker auto-detects `payload.alg`).
 
 ## 4. `solver-backend`
 Dispatched once per solve request when the worker selects its solving backend. Useful for adoption telemetry and A/B benchmarking. Never includes challenge contents, nonces, or hashes.
 
-**Event Type:** `CustomEvent<{ backend: 'wasm' | 'js'; phase: 'solving' }>`
+**Event Type:** `CustomEvent<{ backend: 'wasm' | 'js' | 'argon2id'; phase: 'solving' }>`
 
 ```javascript
 widget.addEventListener('solver-backend', (e) => {
@@ -112,4 +112,4 @@ widget.addEventListener('solver-backend', (e) => {
 });
 ```
 
-In React you can also listen via `onEvent` or directly via `addEventListener` on the element. The event is fired after the worker chooses `wasm` (when `wasm-mode="preferred"` and WebAssembly loads) or `js` (when disabled or unavailable). No `solver-backend` is emitted when `worker-mode="preferred"` falls back to main-thread JS; `error` with `worker-unavailable` is only emitted when `worker-mode="required"` and the worker is unavailable.
+In React you can also listen via `onEvent` or directly via `addEventListener` on the element. The event is fired after the worker chooses `wasm` (when `wasm-mode="preferred"` and WebAssembly loads), `js` (when disabled or unavailable), or `argon2id` (for `algorithm:'argon2id'` challenges, via `hash-wasm` — not controlled by `wasm-mode`). No `solver-backend` is emitted when `worker-mode="preferred"` falls back to main-thread JS; `error` with `worker-unavailable` is only emitted when `worker-mode="required"` and the worker is unavailable.

@@ -13,7 +13,7 @@ type WorkerResponse =
   | { type: 'result'; id: string; solutions: ChallengeSolution[] }
   | { type: 'error'; id: string; error: string }
   | { type: 'cancelled'; id: string }
-  | { type: 'backend'; id: string; backend: 'wasm' | 'js' };
+  | { type: 'backend'; id: string; backend: 'wasm' | 'js' | 'argon2id' };
 
 const workerScope = self as unknown as DedicatedWorkerGlobalScope;
 const activeControllers = new Map<string, AbortController>();
@@ -114,7 +114,8 @@ async function solveChallengeWasm(
   return solutions;
 }
 
-async function selectBackend(wasmMode: WasmMode | undefined): Promise<'wasm' | 'js'> {
+async function selectBackend(wasmMode: WasmMode | undefined, isArgon: boolean): Promise<'wasm' | 'js' | 'argon2id'> {
+  if (isArgon) return 'argon2id';
   if (wasmMode === 'disabled') return 'js';
   // preferred (default)
   if (wasmBackendState === 'wasm-unavailable') return 'js';
@@ -128,6 +129,16 @@ async function selectBackend(wasmMode: WasmMode | undefined): Promise<'wasm' | '
   } catch {
     wasmBackendState = 'wasm-unavailable';
     return 'js';
+  }
+}
+
+function isArgonBatch(tokens: string[]): boolean {
+  // Peek first token — batches are homogeneous (single createChallenge call)
+  try {
+    const p = decodeChallengeToken(tokens[0] ?? '');
+    return (p as unknown as { alg?: string })?.alg === 'argon2id';
+  } catch {
+    return false;
   }
 }
 
@@ -154,7 +165,8 @@ workerScope.addEventListener('message', (event: MessageEvent<WorkerRequest>) => 
   const wasmMode: WasmMode = request.wasmMode === 'disabled' ? 'disabled' : 'preferred';
 
   (async () => {
-    const backend = await selectBackend(wasmMode);
+    const isArgon = isArgonBatch(request.tokens);
+    const backend = await selectBackend(wasmMode, isArgon);
 
     // Telemetry: report backend selection once per request
     if (!controller.signal.aborted) {
@@ -165,6 +177,8 @@ workerScope.addEventListener('message', (event: MessageEvent<WorkerRequest>) => 
       }
     }
 
+    // For argon2id, solveChallenge already dispatches via hash-wasm and is the optimal path (WASM bundled as base64, not fetch)
+    // For sha256, wasm batch path is preferred when available
     const solver = backend === 'wasm' ? solveChallengeWasm : solveChallenge;
 
     // For wasm-unavailable fallback, re-select if wasm fails during solve? We already selected js

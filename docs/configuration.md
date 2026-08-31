@@ -16,9 +16,11 @@ import { createChallenge } from 'ribaunt';
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `difficulty` | `number` | `5` | The number of leading zeros required in the SHA-256 hash. Higher values exponentially increase solve time. Values `> 6` may cause browsers to hang. |
+| `difficulty` | `number` | `5` | Number of leading zeros required in the hash. Higher values exponentially increase solve time. SHA-256 `1..64` (values `>6` may hang browsers); Argon2id `1..8` (defaults `1..2`). |
 | `amount` | `number` | `4` | Number of individual PoW challenges generated at once. Distributes solving workload but requires more network bandwidth. |
 | `ttlSeconds` | `number` | `30` | Expiration time of the JWT token. Rejects solutions submitted after this threshold. |
+| `algorithm` | `'sha256' \| 'argon2id'` | `'sha256'` | PoW algorithm. `argon2id` is memory-hard (`hash-wasm@4.12.0`, `m=8192 t=1 p=1` via `argonProfile`). Opt-in `demo/argon.html` (`pnpm demo`). |
+| `argonProfile` | `'mobile' \| 'standard'` | `'mobile'` | Only when `algorithm:'argon2id'`. Abstracts `m/t/p` (`{m:8192,t:1,p:1,hashLen:32}`, `HARD_MAX m=32768 t=3`). Never pass raw `m/t/p`. |
 
 ### Validation Rules
 
@@ -58,15 +60,15 @@ Calibration is self-reported and must be treated as untrusted. Ribaunt uses it a
 Calibration is available in both server and browser environments:
 
 ```typescript
-import { calibrateNode } from 'ribaunt';       // Node.js server-side
-import { calibrateBrowser } from 'ribaunt/widget';  // Browser (Web Crypto)
+import { calibrateNode, calibrateArgonNode } from 'ribaunt';       // Node.js server-side
+import { calibrateBrowser, calibrateArgonBrowser } from 'ribaunt/widget';  // Browser (Web Crypto vs hash-wasm)
 ```
 
-Both exports also expose `calibrateClient` as a cross-environment alias for convenience. Bundlers resolve the correct implementation automatically via the package export map.
+Both exports also expose `calibrateClient` / `calibrateArgonClient` as cross-environment aliases for convenience. **Use the matching calibrator for the algorithm** (`sha` cal ≠ `argon` cal) — mismatched calibration will over/under-estimate. Bundlers resolve the correct implementation automatically via the package export map.
 
 ```typescript
-import { calibrateClient } from 'ribaunt';     // Node.js
-import { calibrateClient } from 'ribaunt/widget'; // browser (when bundling for the client)
+import { calibrateClient, calibrateArgonClient } from 'ribaunt';     // Node.js
+import { calibrateClient, calibrateArgonClient } from 'ribaunt/widget'; // browser (when bundling for the client)
 ```
 
 ### Auto Hardness Options
@@ -75,11 +77,13 @@ When using `difficulty: "auto"`, the following `ChallengeOptions` fields are ava
 
 | Option | Type | Default | Description |
 |---|---|---|---|
+| `algorithm` | `'sha256' \| 'argon2id'` | `'sha256'` | When `'argon2id'`, uses `argonProfile` (`m=8192 t=1`) and caps `difficulty` to `1..8` (defaults `1..2`). |
+| `argonProfile` | `'mobile' \| 'standard'` | `'mobile'` | Only with `algorithm:'argon2id'`. `high` (`m=32768 t=3`) is gated (Stage D). |
 | `targetDurationMs` | `number` | `750` | Desired solve time in milliseconds. |
 | `riskScore` | `number` | `50` | Server-side risk appetite (0–100). Higher values prefer more work within bounds, independent of calibration. |
-| `calibration` | `ClientCalibration` | `undefined` | Untrusted client benchmark. Raise-only: can increase work above the server baseline, never below. |
-| `minDifficulty` | `number` | `3` | Minimum difficulty floor. |
-| `maxDifficulty` | `number` | `6` | Maximum difficulty ceiling. |
+| `calibration` | `ClientCalibration` | `undefined` | Untrusted client benchmark. Raise-only: can increase work above the server baseline, never below. **Must match `algorithm`** (`calibrateNode` vs `calibrateArgonNode`). |
+| `minDifficulty` | `number` | `3` (`1` for argon) | Minimum difficulty floor. |
+| `maxDifficulty` | `number` | `6` (`2` for argon) | Maximum difficulty ceiling. |
 | `minAmount` | `number` | `1` | Minimum challenge amount. |
 | `maxAmount` | `number` | `8` | Maximum challenge amount. |
 
@@ -101,7 +105,7 @@ const workload = selectWorkload({
 // { difficulty: 3, amount: 5, estimatedAttempts: 20480 }
 ```
 
-Returns a `Workload` object with `{ difficulty, amount, estimatedAttempts }`. This is the same function `createChallenge()` calls internally when `difficulty` is `"auto"`.
+Returns a `Workload` object with `{ difficulty, amount, estimatedAttempts, algorithm, argon? }`. This is the same function `createChallenge()` calls internally when `difficulty` is `"auto"`. For `argon2id`, `argon:{m,t,p}` is included and `profile` is device-aware.
 
 ### `assess(options)` — Risk Engine (optional policy layer)
 
@@ -200,9 +204,9 @@ await verifySolution(tokens, solutions, {
 });
 ```
 
-## Server-Side: `solveChallenge` (sync utility)
+## Server-Side: `solveChallenge` (sync) / `solveChallengeAsync` (async)
 
-`solveChallenge()` is provided mainly for testing/debugging flows and supports optional guardrails to prevent long synchronous runs.
+`solveChallenge()` is provided mainly for testing/debugging flows and supports optional guardrails to prevent long synchronous runs. It solves `sha256` only and returns `undefined` for `argon2id` tokens. Use `solveChallengeAsync()` for both algorithms (auto-detects `payload.alg` per token):
 
 | Option | Type | Default | Description |
 |---|---|---|---|
@@ -210,10 +214,40 @@ await verifySolution(tokens, solutions, {
 | `maxDurationMs` | `number` | `30000` | Maximum synchronous solve time per token before returning `undefined`. |
 
 ```typescript
-const solution = solveChallenge(token, {
+const solution = solveChallenge(token, { // sha256 only
   maxDurationMs: 2000,
   maxIterations: 500_000,
 });
+const solution2 = await solveChallengeAsync(tokens); // sha256 and argon2id
+```
+
+Browser entry points (`ribaunt/widget` `solveChallenge`/`solveSingleChallenge`) auto-detect `alg` per token (Web Crypto SHA vs `hash-wasm` Argon) and `calibrateArgonBrowser` is available alongside `calibrateBrowser`.
+
+### Proof-of-Work Algorithm — `argon2id` opt-in
+
+Default remains `sha256` (microsecond hashes, cheap verify). For higher attacker memory cost, opt in to `argon2id`:
+
+```typescript
+const challenges = await createChallenge({
+  algorithm: 'argon2id',
+  argonProfile: 'mobile', // 'mobile' | 'standard' → {m:8192,t:1,p:1,hashLen:32}
+  difficulty: 'auto',
+  calibration: await calibrateArgonNode(), // must match algorithm
+  targetDurationMs: 750,
+  minDifficulty: 1, maxDifficulty: 2, // argon caps at 8, defaults 1..2
+});
+await verifySolution(tokens, await solveChallengeAsync(tokens)); // auto-dispatches
+```
+
+* `HARD_MAX` (`m=32768 t=3 p=1 hashLen=32`) is library-enforced. `high` profile is gated (Stage D, see `bench/BROWSERSTACK.md`).
+* `argonProfile` abstracts `m/t/p` — never pass raw memory params. The adaptive engine (`riskScore` + `calibration`) keeps it device-aware, same as SHA.
+* `assess({workload:{algorithm:'argon2id', argonProfile:'mobile'}})` threads the profile through; `verifySolution` needs no flag (payload carries `alg/m/t/p`).
+* **Performance:** `bench/memory-hard-server.ts` (`hash-wasm@4.12.0`) mobile `~6ms/hash` Node (`~12ms` browser); `difficulty:1` ≈ `16` avg attempts → `~400ms` browser, `difficulty:2` → `256` avg → `~3s` (`×amount`). Use `difficulty:'auto'` with `calibrateArgonBrowser` for `~750ms` target. Demo: `demo/argon.html` (`pnpm demo` → `http://localhost:3000/argon.html`).
+* **Worker:** `solver-worker.ts` auto-detects `alg` per batch, reports `backend:'argon2id'` (vs `'wasm'|'js'` for SHA). No `wasm-mode` tuning needed for Argon; `hash-wasm` WASM is base64-bundled (`demo/lib/hash-wasm.js` for static demo, `importmap` `hash-wasm` → `./lib/hash-wasm.js`).
+
+```typescript
+const a = await assess({ signals:{requestVelocity: 120}, workload:{algorithm:'argon2id', argonProfile:'mobile'} });
+if (a.action==='challenge') await createChallenge({...a.workload, algorithm:'argon2id'});
 ```
 
 ## Client-Side: `RibauntWidget` Attributes
@@ -287,6 +321,8 @@ When `disabled` is present and not equal to `"false"`:
 
 The browser solver now ships with an optional WebAssembly-backed SHA-256 batch solver for higher throughput. By default `wasm-mode="preferred"` the worker attempts to load `dist/ribaunt-solver.wasm` via `new URL('./ribaunt-solver.wasm', import.meta.url)` and runs a batched hash loop (`solve_batch`) amortizing JS/WASM call overhead. If WASM is unavailable (WebAssembly disabled, asset fetch failure, CSP blocking `wasm-unsafe-eval`, or instantiation failure) the worker transparently falls back to the existing JS/WebCrypto solver without protocol changes.
 
+For `argon2id`, the worker uses `hash-wasm@4.12.0` (`argon2id` base64 WASM, `demo/lib/hash-wasm.js` for static demos, `importmap` `hash-wasm` → `./lib/hash-wasm.js`). It is not covered by `wasm-mode` (which controls SHA WASM only) and reports `backend:'argon2id'`.
+
 - `worker-mode` and `wasm-mode` are orthogonal: `worker-mode` controls worker availability, `wasm-mode` controls WASM inside a healthy worker.
 - `wasm-mode="disabled"` forces JS solver inside worker; useful for debugging or restrictive CSP deployments.
 - Batch size is an internal implementation detail (default 1024) tuned via `bench/wasm-vs-js.ts` benchmarks.
@@ -295,7 +331,7 @@ The browser solver now ships with an optional WebAssembly-backed SHA-256 batch s
 
 **CSP / Bundling:** WASM loading may require `script-src` to allow `wasm-unsafe-eval` in strict CSP deployments and `connect-src`/`script-src` access to the `.wasm` asset. Vite, Next.js, and native ESM all handle `new URL(..., import.meta.url)` assets; verify your bundler preserves the sibling `.wasm` file (pnpm pack includes it; check `dist/ribaunt-solver.wasm` exists).
 
-To disable WASM entirely: `<ribaunt-widget wasm-mode="disabled">` or `wasmMode="disabled"` in React. To observe backend selection, listen for `solver-backend` DOM event: `widget.addEventListener('solver-backend', e => console.log(e.detail.backend))` (`wasm`|`js`). Telemetry never includes challenge contents.
+To disable WASM entirely: `<ribaunt-widget wasm-mode="disabled">` or `wasmMode="disabled"` in React. To observe backend selection, listen for `solver-backend` DOM event: `widget.addEventListener('solver-backend', e => console.log(e.detail.backend))` (`wasm`|`js`|`argon2id`). Telemetry never includes challenge contents.
 
 ### Secondary Loader: `show-progress="false"`
 

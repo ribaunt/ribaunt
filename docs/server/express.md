@@ -28,19 +28,22 @@ if (!process.env.RIBAUNT_SECRET) {
   console.warn('WARNING: RIBAUNT_SECRET environment variable is not set!');
 }
 
-// 1. Endpoint to generate a challenge
+// 1. Endpoint to generate a challenge — default sha256, opt-in argon2id
 app.post('/api/captcha/challenge', async (req, res) => {
   try {
-    const { calibration } = req.body;
+    const { calibration, algorithm, argonProfile } = req.body;
 
     // Auto hardness is raise-only: calibration can increase work, but
     // cannot lower this server-owned baseline.
+    // Use matching calibrator: calibrateNode vs calibrateArgonNode (sha cal ≠ argon cal)
     const challenges = await createChallenge({
+      algorithm: algorithm === 'argon2id' ? 'argon2id' : 'sha256',
+      ...(algorithm === 'argon2id' ? { argonProfile: argonProfile || 'mobile' } : {}),
       difficulty: 'auto',
       calibration,
       targetDurationMs: 750,
-      minDifficulty: 3,
-      maxDifficulty: 6,
+      // argon caps at 8 (defaults 1..2), sha 1..64 (defaults 3..6)
+      ...(algorithm === 'argon2id' ? { minDifficulty: 1, maxDifficulty: 2 } : { minDifficulty: 3, maxDifficulty: 6 }),
       minAmount: 1,
       maxAmount: 8,
       ttlSeconds: 120,
@@ -50,6 +53,9 @@ app.post('/api/captcha/challenge', async (req, res) => {
     res.status(500).json({ error: 'Failed to generate challenge' });
   }
 });
+// For a dedicated argon endpoint: POST /api/captcha/challenge/argon
+// import { calibrateArgonNode } from 'ribaunt';
+// const challenges = await createChallenge({ algorithm:'argon2id', argonProfile:'mobile', difficulty:'auto', calibration: req.body.calibration });
 
 // 2. Endpoint to verify the solution
 app.post('/api/captcha/verify', async (req, res) => {

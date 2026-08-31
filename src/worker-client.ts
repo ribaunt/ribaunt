@@ -5,7 +5,8 @@ import {
 
 export type WorkerMode = 'preferred' | 'required' | 'disabled';
 export type WasmMode = 'preferred' | 'disabled';
-export type SolverBackend = 'wasm' | 'js';
+export type PowAlgorithm = 'sha256' | 'argon2id';
+export type SolverBackend = 'wasm' | 'js' | 'argon2id';
 export type SolverBackendEvent = { type: 'solver-backend'; backend: SolverBackend };
 
 export class WorkerUnavailableError extends Error {

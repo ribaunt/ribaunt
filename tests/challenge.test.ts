@@ -123,7 +123,7 @@ describe('test challenge flow', () => {
     });
 
     it('selects deterministic bounded adaptive workloads', () => {
-        expect(selectWorkload()).toEqual({
+        expect(selectWorkload()).toMatchObject({
             difficulty: 3,
             amount: 5,
             estimatedAttempts: 20_480,

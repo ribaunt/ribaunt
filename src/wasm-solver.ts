@@ -87,14 +87,21 @@ async function loadWasmBytes(): Promise<Uint8Array> {
     candidates.push(new URL('./dist/ribaunt-solver.wasm', import.meta.url));
   } catch (_e) { void _e; }
 
-  // Browser / worker path: try fetch for each candidate
+  // Browser / worker path: try fetch for each candidate (only http/https and valid wasm)
   if (typeof fetch === 'function') {
     for (const cand of candidates) {
       try {
+        const url = cand instanceof URL ? cand : new URL(String(cand));
+        if (url.protocol === 'file:') continue;
         const res = await fetch(cand);
         if (res.ok) {
           const buf = await res.arrayBuffer();
-          if (buf.byteLength > 0) return new Uint8Array(buf);
+          if (buf.byteLength > 0) {
+            const u8 = new Uint8Array(buf);
+            if (u8.length >= 4 && u8[0] === 0x00 && u8[1] === 0x61 && u8[2] === 0x73 && u8[3] === 0x6d) {
+              return u8;
+            }
+          }
         }
       } catch (_e) { void _e; }
     }
