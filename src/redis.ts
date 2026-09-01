@@ -12,6 +12,10 @@ export interface IORedisClientLike {
   eval(script: string, numberOfKeys: number, ...args: Array<string | number>): Promise<unknown>;
 }
 
+/**
+ * Redis Lua script that atomically checks and marks tokens as consumed.
+ * Returns 1 if all tokens were not previously seen (success), 0 if any existed (replay detected).
+ */
 const CONSUME_SCRIPT = `
 for i, key in ipairs(KEYS) do
   if redis.call('EXISTS', key) == 1 then
@@ -25,14 +29,24 @@ end
 return 1
 `;
 
+/**
+ * Prepends the configured prefix to each JTI to construct Redis keys.
+ */
 function createKeys(jtis: string[], prefix: string): string[] {
   return jtis.map((jti) => `${prefix}${jti}`);
 }
 
+/**
+ * Converts Unix timestamp (seconds) to milliseconds remaining from now.
+ * Returns at least 1ms to ensure TTL is always positive.
+ */
 function ttlMilliseconds(expiresAt: number): number {
   return Math.max(1, Math.floor((expiresAt * 1000) - Date.now()));
 }
 
+/**
+ * Interprets Redis EVAL return value as success (token consumed) or failure (replay detected).
+ */
 function resultIsConsumed(result: unknown): boolean {
   return result === 1 || result === '1' || result === true;
 }
@@ -54,6 +68,14 @@ class RedisReplayStore implements ReplayStore {
   }
 }
 
+/**
+ * Creates a Redis-backed replay store for use with the node-redis client.
+ * The store prevents token replay attacks by tracking consumed JTIs with automatic expiration.
+ *
+ * @param client - node-redis client instance
+ * @param options - Optional configuration including key prefix (default: '{ribaunt}:replay:')
+ * @returns ReplayStore instance compatible with verifySolution
+ */
 export function createNodeRedisReplayStore(
   client: NodeRedisClientLike,
   options: RedisReplayStoreOptions = {}
@@ -70,6 +92,14 @@ export function createNodeRedisReplayStore(
   );
 }
 
+/**
+ * Creates a Redis-backed replay store for use with the ioredis client.
+ * The store prevents token replay attacks by tracking consumed JTIs with automatic expiration.
+ *
+ * @param client - ioredis client instance
+ * @param options - Optional configuration including key prefix (default: '{ribaunt}:replay:')
+ * @returns ReplayStore instance compatible with verifySolution
+ */
 export function createIORedisReplayStore(
   client: IORedisClientLike,
   options: RedisReplayStoreOptions = {}

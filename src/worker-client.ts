@@ -128,6 +128,24 @@ function solveInWorker(
   });
 }
 
+/**
+ * Solves challenge tokens using a Web Worker when available, with fallback to main thread.
+ *
+ * Worker mode:
+ * - 'preferred' (default): Try worker, fall back to main thread on failure
+ * - 'required': Fail if worker unavailable
+ * - 'disabled': Always solve on main thread
+ *
+ * WASM mode controls whether the worker uses WebAssembly acceleration for SHA-256 challenges.
+ *
+ * @param tokens - Challenge tokens to solve
+ * @param onProgress - Optional callback for progress updates (0-100)
+ * @param signal - Optional AbortSignal to cancel solving
+ * @param mode - Worker execution mode
+ * @param wasmMode - WASM acceleration mode ('preferred' | 'disabled')
+ * @param onBackend - Optional callback reporting which solver backend was selected
+ * @returns Array of solutions matching the input tokens
+ */
 export async function solveChallengeWithWorker(
   tokens: string[],
   onProgress?: (progress: number) => void,

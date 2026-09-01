@@ -158,6 +158,13 @@ async function instantiateWasm(): Promise<boolean> {
   }
 }
 
+/**
+ * Ensures the WASM solver module is loaded and ready for use.
+ * Loads, verifies integrity, and compiles the solver on first call.
+ * Subsequent calls return cached state.
+ *
+ * @returns true if WASM is ready, false if unavailable
+ */
 export async function ensureWasm(): Promise<boolean> {
   if (wasmState === 'wasm-ready') return true;
   if (wasmState === 'wasm-unavailable') return false;
@@ -172,10 +179,17 @@ export async function ensureWasm(): Promise<boolean> {
   return loadPromise;
 }
 
+/**
+ * Returns the current WASM module state.
+ */
 export function getWasmState(): typeof wasmState {
   return wasmState;
 }
 
+/**
+ * Resets WASM state for testing purposes.
+ * Should not be called in production code.
+ */
 export function resetWasmForTesting(): void {
   wasmInstance = null;
   wasmState = 'uninitialized';
@@ -185,17 +199,27 @@ export function resetWasmForTesting(): void {
   cachedLen = 0;
 }
 
-// For testing: allow injecting failure or mock
+/**
+ * Marks WASM as unavailable for testing fallback behavior.
+ * Should not be called in production code.
+ */
 export function setWasmUnavailableForTesting(): void {
   wasmState = 'wasm-unavailable';
   wasmInstance = null;
   loadPromise = Promise.resolve(false);
 }
 
+/**
+ * Checks if the WASM solver is currently loaded and ready.
+ */
 export function isWasmAvailable(): boolean {
   return wasmState === 'wasm-ready';
 }
 
+/**
+ * Clears the WASM memory heap and cached challenge data.
+ * Called between tokens to prevent memory leaks.
+ */
 export function resetWasmHeap(): void {
   cachedChallenge = null;
   cachedPtr = 0;
@@ -324,7 +348,10 @@ export function solveBatch(
   return { found: true, nonce: nonceStr, hash: hashHex };
 }
 
-// Re-export for worker to use TextEncoder check
+/**
+ * Checks if TextEncoder is available in the current environment.
+ * Used by worker to determine if UTF-8 encoding is supported.
+ */
 export function isTextEncoderAvailable(): boolean {
   return typeof TextEncoder !== 'undefined';
 }

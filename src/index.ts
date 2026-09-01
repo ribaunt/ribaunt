@@ -586,6 +586,13 @@ export async function assess(options: AssessOptions): Promise<RiskAssessment> {
   return { risk, action };
 }
 
+/**
+ * Measures SHA-256 hashing speed on Node.js to calibrate adaptive workload selection.
+ * Runs a small benchmark to estimate device performance.
+ *
+ * @param iterations - Number of SHA-256 hashes to run (default: 128)
+ * @returns Calibration object with iterations and measured duration
+ */
 export function calibrateNode(iterations = 128): ClientCalibration {
   if (!Number.isFinite(iterations) || iterations < 1) {
     throw new Error('Calibration iterations must be at least 1');
@@ -603,6 +610,9 @@ export function calibrateNode(iterations = 128): ClientCalibration {
   };
 }
 
+/**
+ * Alias for calibrateNode - measures device hashing speed for adaptive workload.
+ */
 export const calibrateClient = calibrateNode;
 
 let cachedArgonCalibrationWarmup: Promise<void> | null = null;
@@ -653,9 +663,15 @@ export async function calibrateArgonNode(iterations = 16): Promise<ClientCalibra
   };
 }
 
+/**
+ * Alias for calibrateArgonNode - measures Argon2id performance for adaptive workload.
+ */
 export const calibrateArgonClient = calibrateArgonNode;
 
-// Test helpers — not part of public API surface but exported for bench / testing
+/**
+ * Resets Argon2id module cache for testing purposes.
+ * Should not be called in production code.
+ */
 export function __resetArgonForTesting(): void {
   cachedArgon2id = null;
   argon2idLoadPromise = null;
@@ -731,6 +747,21 @@ function emitEvent(
   }
 }
 
+/**
+ * Creates cryptographically-signed challenge tokens for proof-of-work verification.
+ *
+ * Supports two call signatures:
+ * 1. `createChallenge(difficulty, amount, ttlSeconds)` - simple numeric params
+ * 2. `createChallenge(options)` - full options object with adaptive workload, rate limiting, etc.
+ *
+ * When `difficulty: 'auto'` is used, workload is selected based on risk score and calibration.
+ * Supports both SHA-256 and Argon2id algorithms (via `algorithm` option).
+ *
+ * @param difficultyOrOptions - Difficulty level (1-64) or options object
+ * @param amount - Number of challenges to create (default: 4)
+ * @param ttlSeconds - Token expiration in seconds (default: 30)
+ * @returns Array of signed challenge tokens
+ */
 export async function createChallenge(
   difficulty?: number,
   amount?: number,
@@ -854,6 +885,14 @@ function solveSingleChallenge(
   }
 }
 
+/**
+ * Solves SHA-256 proof-of-work challenge(s) synchronously on Node.js.
+ * Does not support Argon2id challenges (use solveChallengeAsync for those).
+ *
+ * @param token - Single challenge token or array of tokens
+ * @param options - Optional constraints (maxIterations, maxDurationMs)
+ * @returns Solution(s) with nonce and hash, or undefined if unsolvable
+ */
 export function solveChallenge(token: ChallengeToken, options?: SolveChallengeOptions): ChallengeSolution | undefined;
 export function solveChallenge(token: ChallengeToken[], options?: SolveChallengeOptions): ChallengeSolution[] | undefined;
 export function solveChallenge(
@@ -915,6 +954,14 @@ async function solveSingleChallengeAsync(
   }
 }
 
+/**
+ * Solves proof-of-work challenge(s) asynchronously on Node.js.
+ * Supports both SHA-256 and Argon2id challenges.
+ *
+ * @param token - Single challenge token or array of tokens
+ * @param options - Optional constraints (maxIterations, maxDurationMs)
+ * @returns Promise resolving to solution(s) with nonce and hash, or undefined if unsolvable
+ */
 export async function solveChallengeAsync(token: ChallengeToken, options?: SolveChallengeOptions): Promise<ChallengeSolution | undefined>;
 export async function solveChallengeAsync(token: ChallengeToken[], options?: SolveChallengeOptions): Promise<ChallengeSolution[] | undefined>;
 export async function solveChallengeAsync(
@@ -992,6 +1039,22 @@ function contextMatches(payload: ChallengeTokenPayload, suppliedContext: string 
   return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
 }
 
+/**
+ * Verifies that a proof-of-work solution correctly solves the challenge token(s).
+ *
+ * Validation steps:
+ * 1. JWT signature and expiration check
+ * 2. Hash verification (recomputed hash matches difficulty)
+ * 3. Context binding check (if context was provided)
+ * 4. Replay prevention (via ReplayStore if configured)
+ *
+ * Supports batch verification with atomic replay detection.
+ *
+ * @param token - Challenge token(s) to verify
+ * @param nonce - Solution nonce(s) or ChallengeSolution object(s)
+ * @param options - Verification options (replay prevention, context, rate limiting)
+ * @returns Result indicating validity or specific failure reason
+ */
 export async function verifySolution(
   token: ChallengeToken | ChallengeToken[],
   nonce: number | string | Array<number | string> | ChallengeSolution | ChallengeSolution[],

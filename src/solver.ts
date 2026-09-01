@@ -248,13 +248,23 @@ export async function calibrateArgonBrowser(iterations = 16): Promise<BrowserCal
 
 export const calibrateArgonClient = calibrateArgonBrowser;
 
-// Test hook
+/**
+ * Resets Argon2id module cache for testing purposes.
+ * Should not be called in production code.
+ */
 export function __resetArgonForTesting(): void {
   cachedArgon2id = null;
   argon2idPromise = null;
   calibrateArgonWarmup = null;
 }
 
+/**
+ * Decodes a challenge token JWT without verification to inspect its payload.
+ * Useful for reading algorithm, difficulty, and parameters before solving.
+ *
+ * @param token - JWT challenge token
+ * @returns Decoded payload or null if invalid
+ */
 export function decodeChallengeToken(token: string): ChallengePayload | null {
   return decodeJWT(token);
 }
