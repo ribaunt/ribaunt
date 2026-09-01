@@ -29,6 +29,15 @@ const files = [
   'ribaunt-solver.wasm',
 ];
 
+// Also copy hash-wasm for argon demo (local importmap, avoids CDN and worker inheritance issues)
+try {
+  await cp(resolve(root, 'node_modules/hash-wasm/dist/index.esm.js'), resolve(demoLib, 'hash-wasm.js'), { force: true });
+  await cp(resolve(root, 'node_modules/hash-wasm/dist/index.esm.js'), resolve(dist, 'hash-wasm.js'), { force: true });
+  console.log('[prepare-demo] Synced hash-wasm.js to demo/lib and dist');
+} catch (e) {
+  console.warn('[prepare-demo] hash-wasm copy failed', e?.message);
+}
+
 for (const f of files) {
   try {
     await cp(resolve(dist, f), resolve(demoLib, f), { force: true });

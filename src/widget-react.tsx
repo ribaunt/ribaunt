@@ -46,6 +46,10 @@ export interface RibauntWidgetHandle {
   startVerification: () => void;
 }
 
+/**
+ * Synchronizes a React prop value to a DOM element attribute.
+ * Removes the attribute if value is undefined, false, or 'false'.
+ */
 function syncAttribute(
   element: RibauntWidgetElement,
   name: string,
@@ -61,6 +65,10 @@ function syncAttribute(
 
 const HANDLER_PROP_PATTERN = /^on[A-Z]/;
 
+/**
+ * Converts React event handler prop name to DOM event type.
+ * Example: 'onClick' -> 'click'
+ */
 function toDomEventType(key: string): string {
   return key.slice(2).toLowerCase();
 }
@@ -105,6 +113,10 @@ function applyStandardProps(
   appliedPropsCache.set(element, applied);
 }
 
+/**
+ * Synchronizes all Ribaunt-specific widget props to DOM attributes.
+ * Handles special cases like showProgress which uses tri-state logic.
+ */
 function syncWidgetProps(
   element: RibauntWidgetElement,
   {

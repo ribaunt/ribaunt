@@ -36,12 +36,22 @@ import { createChallenge, verifySolution } from 'ribaunt';
 const app = express();
 app.use(express.json());
 
-// 1. Endpoint to get a challenge
+// 1. Endpoint to get a challenge — default sha256
 app.get('/api/captcha/challenge', async (req, res) => {
   // Generate 4 challenges with difficulty 5, valid for 300 seconds
   const challenges = await createChallenge(5, 4, 300);
   res.json({ challenges });
 });
+
+// Opt-in argon2id (memory-hard) — same API, profile abstracts m/t/p
+// import { calibrateArgonNode } from 'ribaunt';
+// app.post('/api/captcha/challenge', async (req, res) => {
+//   const challenges = await createChallenge({
+//     algorithm: 'argon2id', argonProfile: 'mobile',
+//     difficulty: 'auto', calibration: req.body.calibration, targetDurationMs: 750,
+//   });
+//   res.json({ challenges });
+// });
 
 // 2. Endpoint to verify the solution
 app.post('/api/captcha/verify', async (req, res) => {

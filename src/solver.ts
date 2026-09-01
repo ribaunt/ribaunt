@@ -12,10 +12,17 @@ export interface BrowserCalibration {
   durationMs: number;
 }
 
+export type PowAlgorithm = 'sha256' | 'argon2id';
+
 export interface ChallengePayload {
   challenge: string;
   difficulty: number;
   expires: number;
+  alg?: PowAlgorithm;
+  m?: number;
+  t?: number;
+  p?: number;
+  hashLen?: number;
 }
 
 /**
@@ -56,6 +63,95 @@ async function sha256(message: string): Promise<string> {
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   return hashHex;
+}
+
+// Argon2id support (isomorphic via hash-wasm) — same params as server HARD_MAX
+const HARD_MAX = { m: 32 * 1024, t: 3, p: 1, hashLen: 32 } as const;
+const ARGON_PROFILES = {
+  mobile: { m: 8 * 1024, t: 1, p: 1, hashLen: 32 },
+  standard: { m: 8 * 1024, t: 1, p: 1, hashLen: 32 },
+} as const;
+
+type Argon2idFn = (opts: { password: string; salt: string; parallelism: number; iterations: number; memorySize: number; hashLength: number; outputType: 'hex' }) => Promise<string>;
+let cachedArgon2id: Argon2idFn | null = null;
+let argon2idPromise: Promise<Argon2idFn> | null = null;
+
+async function getArgon2id(): Promise<Argon2idFn> {
+  if (cachedArgon2id) return cachedArgon2id;
+  if (argon2idPromise) return argon2idPromise;
+  argon2idPromise = (async () => {
+    let lastError: unknown;
+    const isBrowser = typeof window !== 'undefined' || typeof self !== 'undefined';
+    // 1) bare specifier — works when bundled (vite/next) or Node (node_modules)
+    // 2) relative URLs — work when served statically (demo server, no bundler, worker)
+    // 3) CDN — last resort for file:// demos
+    const candidates: string[] = ['hash-wasm'];
+    if (isBrowser) {
+      try {
+        const base = (import.meta as unknown as { url: string }).url as string;
+        candidates.push(new URL('./hash-wasm.js', base).toString());
+        candidates.push(new URL('../demo/lib/hash-wasm.js', base).toString());
+      } catch (_e) { void _e; }
+      try {
+        const origin = (globalThis as unknown as { location?: { origin?: string } }).location?.origin;
+        if (origin) candidates.push(new URL('/lib/hash-wasm.js', origin).toString());
+      } catch (_e) { void _e; }
+      candidates.push('https://esm.sh/hash-wasm@4.12.0', 'https://cdn.jsdelivr.net/npm/hash-wasm@4.12.0/dist/index.esm.js');
+    }
+    for (const spec of candidates) {
+      try {
+        const mod: unknown = await import(spec);
+        const pkg = (mod as { default?: unknown }).default ?? mod;
+        const fn = (pkg as { argon2id?: Argon2idFn }).argon2id;
+        if (typeof fn === 'function') {
+          cachedArgon2id = fn;
+          return fn;
+        }
+        lastError = new Error(`hash-wasm at ${spec} has no argon2id`);
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw new Error(`hash-wasm argon2id not available: ${String((lastError as Error)?.message || lastError)}`);
+  })();
+  return argon2idPromise;
+}
+
+function padSalt(challenge: string): string {
+  if (challenge.length >= 16) return challenge.slice(0, 16);
+  return challenge.padEnd(16, '0');
+}
+
+function resolveArgonParams(payload: ChallengePayload): { m: number; t: number; p: number; hashLen: number } {
+  if (payload.m !== undefined) {
+    // Token carries explicit params — validate against HARD_MAX
+    const m = payload.m;
+    const t = payload.t ?? 1;
+    const p = payload.p ?? 1;
+    const hashLen = payload.hashLen ?? 32;
+    if (m < 8 || m > HARD_MAX.m || t < 1 || t > HARD_MAX.t || p < 1 || p > HARD_MAX.p || hashLen !== 32) {
+      throw new Error('Invalid argon2id token params');
+    }
+    return { m, t, p, hashLen };
+  }
+  // Legacy fallback — should not happen for argon tokens but use mobile
+  return ARGON_PROFILES.mobile;
+}
+
+async function argon2idHash(challenge: string, nonce: number | string, payload: ChallengePayload): Promise<string> {
+  const argon2id = await getArgon2id();
+  const params = resolveArgonParams(payload);
+  const salt = padSalt(challenge);
+  const password = `${challenge}${String(nonce)}`;
+  return argon2id({
+    password,
+    salt,
+    parallelism: params.p,
+    iterations: params.t,
+    memorySize: params.m,
+    hashLength: params.hashLen,
+    outputType: 'hex',
+  });
 }
 
 /**
@@ -111,12 +207,72 @@ export async function calibrateBrowser(iterations = 128): Promise<BrowserCalibra
 
 export const calibrateClient = calibrateBrowser;
 
+let calibrateArgonWarmup: Promise<void> | null = null;
+async function ensureArgonWarmup(): Promise<void> {
+  if (calibrateArgonWarmup) return calibrateArgonWarmup;
+  calibrateArgonWarmup = (async () => {
+    try {
+      const argon = await getArgon2id();
+      await argon({
+        password: 'ribaunt-warmup',
+        salt: 'ribaunt-warmup-16b',
+        parallelism: 1,
+        iterations: 1,
+        memorySize: 8 * 1024,
+        hashLength: 32,
+        outputType: 'hex',
+      });
+    } catch {
+      // best-effort
+    }
+  })();
+  return calibrateArgonWarmup;
+}
+
+export async function calibrateArgonBrowser(iterations = 16): Promise<BrowserCalibration> {
+  if (!Number.isFinite(iterations) || iterations < 1) {
+    throw new Error('Calibration iterations must be at least 1');
+  }
+  const normalizedIterations = Math.floor(iterations);
+  await ensureArgonWarmup();
+  const payload: ChallengePayload = { challenge: 'ribaunt-calibration', difficulty: 1, expires: 0, alg: 'argon2id', ...ARGON_PROFILES.mobile };
+  const startedAt = performance.now();
+  for (let index = 0; index < normalizedIterations; index++) {
+    await argon2idHash(`ribaunt-calibration:${index}`, '0', payload);
+  }
+  return {
+    iterations: normalizedIterations,
+    durationMs: Math.max(1, Math.round(performance.now() - startedAt)),
+  };
+}
+
+export const calibrateArgonClient = calibrateArgonBrowser;
+
+/**
+ * Resets Argon2id module cache for testing purposes.
+ * Should not be called in production code.
+ */
+export function __resetArgonForTesting(): void {
+  cachedArgon2id = null;
+  argon2idPromise = null;
+  calibrateArgonWarmup = null;
+}
+
+/**
+ * Decodes a challenge token JWT without verification to inspect its payload.
+ * Useful for reading algorithm, difficulty, and parameters before solving.
+ *
+ * @param token - JWT challenge token
+ * @returns Decoded payload or null if invalid
+ */
 export function decodeChallengeToken(token: string): ChallengePayload | null {
   return decodeJWT(token);
 }
 
 /**
- * Solve a single challenge token (browser-compatible)
+ * Solve a single challenge token (browser-compatible) — auto-detects sha256 vs argon2id via payload.alg.
+ * For argon2id the heavy WASM hash is not internally abortable; cancellation is observed between candidates
+ * with a setTimeout(0) yield (mirrors bench/memory-hard-server.ts:198) and worker.terminate fallback after 250ms.
  */
 export async function solveSingleChallenge(
   token: string,
@@ -126,7 +282,32 @@ export async function solveSingleChallenge(
   if (!payload) return undefined;
 
   const { challenge, difficulty } = payload;
+  const alg = (payload as ChallengePayload).alg ?? 'sha256';
   const prefix = '0'.repeat(difficulty);
+
+  if (alg === 'argon2id') {
+    let nonce = 0;
+    while (true) {
+      if (signal?.aborted) {
+        throw new DOMException('Challenge solving aborted', 'AbortError');
+      }
+      const hash = await argon2idHash(challenge, nonce, payload as ChallengePayload);
+      if (hash.startsWith(prefix)) {
+        return { nonce: String(nonce), hash };
+      }
+      nonce++;
+      // Yield per candidate — argon hash already blocks ~6ms (mobile) to ~63ms (high), so per-iteration yield is cheap
+      // and guarantees abort visibility before the next heavy alloc.
+      await new Promise<void>(r => setTimeout(r, 0));
+      if (signal?.aborted) {
+        throw new DOMException('Challenge solving aborted', 'AbortError');
+      }
+      // Extra UI yield every 2048 for parity with SHA path when needed
+      if (nonce % 2048 === 0) {
+        await yieldToEventLoop();
+      }
+    }
+  }
 
   let nonce = 0;
   while (true) {

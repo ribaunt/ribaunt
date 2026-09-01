@@ -116,6 +116,10 @@ export function validateScorerOutput(value: unknown): number {
   return value;
 }
 
+/**
+ * Clamps and rounds a risk value to the valid range [0, 100].
+ * Non-finite values are treated as 0.
+ */
 export function clampRisk(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(100, Math.round(value)));

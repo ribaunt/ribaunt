@@ -15,7 +15,7 @@ Ribaunt is a stateless proof-of-work CAPTCHA library for Node.js and modern brow
 - Stateless challenge tokens signed with your `RIBAUNT_SECRET`
 - Browser widget for plain HTML apps
 - React and Next.js-friendly wrapper via `ribaunt/widget-react`
-- Server helpers for creating, solving, and verifying PoW challenges
+- Server helpers for creating, solving, and verifying PoW challenges — `sha256` default with opt-in `argon2id` memory-hard
 - Programmable risk engine (`assess()`) with caller-supplied signals, pluggable scorers, and `allow`/`challenge`/`block` policy
 - Default process-local replay protection with support for remote replay stores
 - CSS custom properties for theming
@@ -146,7 +146,7 @@ const challenges = await createChallenge(5, 4, 120);
 
 | Parameter | Default | Description |
 | --- | --- | --- |
-| `difficulty` | `5` | Number of leading zeros required in the SHA-256 hash. Higher values increase solve time. |
+| `difficulty` | `5` | Number of leading zeros required in the hash. Higher values increase solve time (SHA-256 `1..64`, Argon2id `1..8`). |
 | `amount` | `4` | Number of challenges to create. |
 | `ttlSeconds` | `30` | Challenge token lifetime in seconds. |
 
@@ -174,24 +174,27 @@ const challenges = await createChallenge({
 For machine-to-machine checks, benchmark the Node client and send the same calibration shape:
 
 ```ts
-import { calibrateNode } from 'ribaunt';
+import { calibrateNode } from 'ribaunt';             // SHA-256
+import { calibrateArgonNode } from 'ribaunt';        // Argon2id (memory-hard, ~6ms/hash)
 
 const calibration = calibrateNode();
+const argonCalibration = await calibrateArgonNode();
 ```
 
 Browser calibration is also available from the widget entry point:
 
 ```ts
-import { calibrateBrowser } from 'ribaunt/widget';
+import { calibrateBrowser, calibrateArgonBrowser } from 'ribaunt/widget';
 
 const calibration = await calibrateBrowser();
+const argonCalibration = await calibrateArgonBrowser();
 ```
 
-Both environments expose `calibrateClient` as a cross-environment alias:
+Both environments expose `calibrateClient` / `calibrateArgonClient` as cross-environment aliases:
 
 ```ts
-import { calibrateClient } from 'ribaunt';       // Node
-import { calibrateClient } from 'ribaunt/widget'; // browser
+import { calibrateClient, calibrateArgonClient } from 'ribaunt';       // Node
+import { calibrateClient, calibrateArgonClient } from 'ribaunt/widget'; // browser
 ```
 
 ### `selectWorkload(options)`
@@ -207,7 +210,16 @@ const workload = selectWorkload({
   minDifficulty: 3,
   maxDifficulty: 6,
 });
- // { difficulty: 3, amount: 5, estimatedAttempts: 20480 }
+ // { difficulty: 3, amount: 5, estimatedAttempts: 20480, algorithm: 'sha256' }
+
+// Argon2id — profile abstracts m/t/p, workload stays device-aware:
+const argonWorkload = selectWorkload({
+  algorithm: 'argon2id',
+  argonProfile: 'mobile', // 'mobile' | 'standard' → {m:8192,t:1,p:1} (high gated)
+  calibration: await calibrateArgonNode(),
+  targetDurationMs: 750,
+});
+// { difficulty: 1, amount: 5, estimatedAttempts: 80, algorithm:'argon2id', argon:{m:8192,t:1,p:1} }
 ```
 
 ### `assess(options)` — Risk Engine
@@ -322,15 +334,45 @@ const result = await verifySolution(tokens, solutions, { onEvent });
 
 `verify-failure` events carry the same `reason` values as `VerifySolutionResult` (`invalid-token`, `expired-token`, `invalid-solution`, `context-mismatch`, `replay-detected`, `replay-store-unavailable`, `configuration-error`). Add aggregation over Windows, StatsD, or Prometheus yourself — Ribaunt only emits raw events.
 
-### `solveChallenge(token, options?)`
+### `solveChallenge(token, options?)` / `solveChallengeAsync(token, options?)`
 
-Solves challenges synchronously. This is mainly useful for tests and debugging.
+`solveChallenge` solves SHA-256 challenges synchronously. This is mainly useful for tests and debugging. For `argon2id` (or mixed batches) use the async variant — it auto-detects `payload.alg` per token:
 
 ```ts
-const solutions = solveChallenge(challenges, {
+const solutions = solveChallenge(challenges, { // sha256 only, returns undefined for argon
   maxDurationMs: 2000,
   maxIterations: 500_000,
 });
+const solutions2 = await solveChallengeAsync(challenges); // sha256 and argon2id
+```
+
+Browser entry points expose the same auto-detecting `solveChallenge` / `solveSingleChallenge` via `ribaunt/widget` (Web Crypto for SHA, `hash-wasm` `argon2id` for Argon) and `calibrateArgonBrowser`. Worker mode auto-selects `backend: 'argon2id'` for Argon tokens.
+
+### Proof-of-Work Algorithm — `argon2id` opt-in
+
+Default remains `sha256` (microsecond hashes, cheap verify). Opt in to memory-hard Argon2id for higher attacker cost:
+
+```ts
+const challenges = await createChallenge({
+  algorithm: 'argon2id',
+  argonProfile: 'mobile', // 'mobile' | 'standard' → {m:8192,t:1,p:1,hashLen:32} (HARD_MAX m=32768 t=3)
+  difficulty: 'auto',
+  calibration: await calibrateArgonNode(), // must match algorithm (sha cal ≠ argon cal)
+  targetDurationMs: 750,
+  minDifficulty: 1, maxDifficulty: 2, // argon caps at 8, defaults 1..2 (sha 3..6)
+});
+ // tokens carry {alg:'argon2id',m,t,p,hashLen} and verify auto-dispatches
+await verifySolution(tokens, await solveChallengeAsync(tokens));
+```
+
+`HARD_MAX` (`m=32768 t=3 p=1`) is library-enforced. `argonProfile` abstracts `m/t/p` so developers never pass raw memory params — the adaptive engine keeps it device-aware via `riskScore` + `calibration`. `assess({workload:{algorithm:'argon2id', argonProfile:'mobile'}})` threads the profile through. Demo: `demo/argon.html` (`pnpm demo` → `http://localhost:3000/argon.html`, `Network` shows real `/api/challenge/argon` when server is running, otherwise mock fallback).
+
+**Performance (measured via `bench/memory-hard-server.ts` `hash-wasm@4.12.0`):** Argon mobile `~6ms/hash` Node, `~12ms` browser; `difficulty:1` ≈ `16` avg attempts → `~400ms` browser, `difficulty:2` → `256` avg → `~3s` (× `amount`). Use `difficulty:'auto'` with `calibrateArgonBrowser` for `~750ms` target. `high` profile is gated (Stage D).
+
+```ts
+// Risk-aware Argon
+const a = await assess({ signals:{requestVelocity:120}, workload:{algorithm:'argon2id', argonProfile:'mobile'} });
+if (a.action==='challenge') await createChallenge({...a.workload, algorithm:'argon2id'});
 ```
 
 ## Widget Configuration

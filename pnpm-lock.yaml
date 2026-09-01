@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      hash-wasm:
+        specifier: 4.12.0
+        version: 4.12.0
       jsonwebtoken:
         specifier: ^9.0.2
         version: 9.0.3
@@ -798,6 +801,9 @@ packages:
   has-flag@4.0.0:
     resolution: {integrity: sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==}
     engines: {node: '>=8'}
+
+  hash-wasm@4.12.0:
+    resolution: {integrity: sha512-+/2B2rYLb48I/evdOIhP+K/DD2ca2fgBjp6O+GBEnCDk2e4rpeXIK8GvIyRPjTezgmWn9gmKwkQjjx6BtqDHVQ==}
 
   hermes-estree@0.25.1:
     resolution: {integrity: sha512-0wUoCcLp+5Ev5pDW2OriHC2MJCbwLwuRx+gAqMTOkGKJJiBCLjtrvy4PWUGn6MIVefecRpzoOZ/UV6iGdOr+Cw==}
@@ -2100,6 +2106,8 @@ snapshots:
   globals@17.11.0: {}
 
   has-flag@4.0.0: {}
+
+  hash-wasm@4.12.0: {}
 
   hermes-estree@0.25.1: {}
 
