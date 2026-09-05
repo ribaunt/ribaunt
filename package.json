@@ -1,11 +1,11 @@
 {
   "name": "ribaunt",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "A PoW CAPTCHA library that provides stateless and secure user verification",
   "files": [
     "dist"
   ],
-  "homepage": "https://ribaunt.com",
+  "homepage": "https://captcha.ribaunt.com",
   "bugs": {
     "url": "https://github.com/ribaunt/ribaunt/issues"
   },
