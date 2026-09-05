@@ -213,9 +213,11 @@ const workload = selectWorkload({
  // { difficulty: 3, amount: 5, estimatedAttempts: 20480, algorithm: 'sha256' }
 
 // Argon2id — profile abstracts m/t/p, workload stays device-aware:
+// NOTE: 'mobile' and 'standard' currently share the same conservative tuning
+// ({m:8192,t:1,p:1}); 'high' (HARD_MAX) is gated pending device validation.
 const argonWorkload = selectWorkload({
   algorithm: 'argon2id',
-  argonProfile: 'mobile', // 'mobile' | 'standard' → {m:8192,t:1,p:1} (high gated)
+  argonProfile: 'mobile',
   calibration: await calibrateArgonNode(),
   targetDurationMs: 750,
 });
@@ -355,19 +357,21 @@ Default remains `sha256` (microsecond hashes, cheap verify). Opt in to memory-ha
 ```ts
 const challenges = await createChallenge({
   algorithm: 'argon2id',
-  argonProfile: 'mobile', // 'mobile' | 'standard' → {m:8192,t:1,p:1,hashLen:32} (HARD_MAX m=32768 t=3)
+  argonProfile: 'mobile', // 'mobile' | 'standard' currently share {m:8192,t:1,p:1,hashLen:32}; 'high' (HARD_MAX m=32768 t=3) is gated
   difficulty: 'auto',
   calibration: await calibrateArgonNode(), // must match algorithm (sha cal ≠ argon cal)
   targetDurationMs: 750,
   minDifficulty: 1, maxDifficulty: 2, // argon caps at 8, defaults 1..2 (sha 3..6)
 });
- // tokens carry {alg:'argon2id',m,t,p,hashLen} and verify auto-dispatches
+ // tokens carry {v:1, alg:'argon2id',m,t,p,hashLen} and verify auto-dispatches
 await verifySolution(tokens, await solveChallengeAsync(tokens));
 ```
 
-`HARD_MAX` (`m=32768 t=3 p=1`) is library-enforced. `argonProfile` abstracts `m/t/p` so developers never pass raw memory params — the adaptive engine keeps it device-aware via `riskScore` + `calibration`. `assess({workload:{algorithm:'argon2id', argonProfile:'mobile'}})` threads the profile through. Demo: `demo/argon.html` (`pnpm demo` → `http://localhost:3000/argon.html`, `Network` shows real `/api/challenge/argon` when server is running, otherwise mock fallback).
+`HARD_MAX` (`m=32768 t=3 p=1`) is library-enforced on both server and client (tokens claiming more are rejected as `invalid-token`). `argonProfile` abstracts `m/t/p` so developers never pass raw memory params — the adaptive engine keeps it device-aware via `riskScore` + `calibration`. Each token embeds its own real `m/t/p` plus a construction version (`v:1` covering salt derivation and difficulty mechanism), so future profile retuning doesn't break in-flight tokens; unknown future versions fail closed. `assess({workload:{algorithm:'argon2id', argonProfile:'mobile'}})` threads the profile through. Demo: `demo/argon.html` (`pnpm demo` → `http://localhost:3000/argon.html`, `Network` shows real `/api/challenge/argon` when server is running, otherwise mock fallback).
 
 **Performance (measured via `bench/memory-hard-server.ts` `hash-wasm@4.12.0`):** Argon mobile `~6ms/hash` Node, `~12ms` browser; `difficulty:1` ≈ `16` avg attempts → `~400ms` browser, `difficulty:2` → `256` avg → `~3s` (× `amount`). Use `difficulty:'auto'` with `calibrateArgonBrowser` for `~750ms` target. `high` profile is gated (Stage D).
+
+**Non-goals (Argon2id):** Argon2id *narrows* but does not eliminate the attacker's GPU/ASIC advantage — a well-funded adversary can still solve any PoW challenge, just at higher memory cost. Treat it as one abuse-cost layer behind rate limiting and risk signals, not as human verification or a sole gate for sensitive actions. The heavier (gated) tuning is not for latency-sensitive flows: only opt in where a ~0.5–3s client solve budget is acceptable, and keep `sha256` as the default elsewhere.
 
 ```ts
 // Risk-aware Argon

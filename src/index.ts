@@ -31,6 +31,12 @@ export const HARD_MAX = {
 } as const;
 
 export const ARGON_PROFILES: Record<ArgonProfile, { m: number; t: number; p: number; hashLen: number }> = {
+  // NOTE: mobile and standard intentionally share the same conservative
+  // first-cut tuning ({m:8192,t:1,p:1}). A heavier `high` profile
+  // (m=32768 t=3, HARD_MAX) exists but is gated (Stage D, see bench/BROWSERSTACK.md)
+  // pending broader device validation. Keep the two names so callers can
+  // adopt the tier split now; retuning `standard` later won't break in-flight
+  // tokens because each token embeds its own real m/t/p.
   mobile: { m: 8 * 1024, t: 1, p: 1, hashLen: 32 },
   standard: { m: 8 * 1024, t: 1, p: 1, hashLen: 32 },
 };
@@ -46,6 +52,9 @@ interface ChallengeTokenPayload {
   t?: number;
   p?: number;
   hashLen?: number;
+  // Construction version: 1 = challenge‖nonce password, salt = first 16 chars
+  // of `challenge`, leading-zero hex difficulty. Absent = legacy v1 (accepted).
+  v?: number;
 }
 
 export type ChallengeToken = string;
@@ -232,6 +241,11 @@ async function getArgon2idFn(): Promise<Argon2idFn> {
 }
 
 function padSalt(challenge: string): string {
+  // New challenges are always >= 16 chars of real entropy (see
+  // generateChallenge), so this is a straight slice. The padEnd branch only
+  // exists to keep verifying legacy 8-char challenges issued before the
+  // entropy fix — its salt is weaker (8 random chars + '0' padding) but still
+  // provides per-challenge domain separation.
   if (challenge.length >= 16) return challenge.slice(0, 16);
   return challenge.padEnd(16, '0');
 }
@@ -277,6 +291,9 @@ function isValidPayload(payload: unknown): payload is ChallengeTokenPayload {
   const value = payload as Partial<ChallengeTokenPayload>;
   if (typeof value.challenge !== 'string' || value.challenge.length === 0) return false;
   if (typeof value.difficulty !== 'number' || !Number.isInteger(value.difficulty) || value.difficulty < 1) return false;
+  // Construction version: absent = legacy v1, present must be 1. Rejects
+  // unknown future constructions rather than solving under wrong assumptions.
+  if (value.v !== undefined && value.v !== 1) return false;
   const alg = (value.alg ?? 'sha256') as PowAlgorithm;
   if (alg === 'argon2id') {
     if (value.difficulty > MAX_WORKLOAD_ARGON_DIFFICULTY) return false;
@@ -678,8 +695,12 @@ export function __resetArgonForTesting(): void {
   cachedArgonCalibrationWarmup = null;
 }
 
-function generateChallenge(length = 8): string {
-  return crypto.randomBytes(length).toString('base64url').slice(0, length);
+function generateChallenge(): string {
+  // 16 random bytes (128-bit) encoded as 22 base64url chars. The Argon2id salt
+  // is the first 16 chars of this string, so it always carries ~96 bits of
+  // real entropy — never zero-padding. (Pre-fix challenges were 8 chars, hence
+  // the padEnd legacy branch in padSalt.)
+  return crypto.randomBytes(16).toString('base64url');
 }
 
 function hashContext(context: string, jti: string): string {
@@ -715,6 +736,7 @@ function createSingleChallenge(
     difficulty,
     expires: Math.floor(Date.now() / 1000) + ttlSeconds,
     jti,
+    v: 1,
   };
   if (algorithm === 'argon2id') {
     payload.alg = 'argon2id';
@@ -866,6 +888,7 @@ function solveSingleChallenge(
   try {
     const payload = jwt.decode(token) as ChallengeTokenPayload | null;
     if (!payload) return undefined;
+    if (payload.v !== undefined && payload.v !== 1) return undefined;
     // Sync solver only supports sha256; argon2id requires async path
     const alg = (payload as ChallengeTokenPayload).alg ?? 'sha256';
     if (alg === 'argon2id') return undefined;
@@ -918,6 +941,7 @@ async function solveSingleChallengeAsync(
   try {
     const payload = jwt.decode(token) as ChallengeTokenPayload | null;
     if (!payload) return undefined;
+    if (payload.v !== undefined && payload.v !== 1) return undefined;
     const alg = payload.alg ?? 'sha256';
     const prefix = '0'.repeat(payload.difficulty);
     const maxIterations = normalizeMaxIterations(options);

@@ -23,6 +23,7 @@ export interface ChallengePayload {
   t?: number;
   p?: number;
   hashLen?: number;
+  v?: number;
 }
 
 /**
@@ -67,6 +68,9 @@ async function sha256(message: string): Promise<string> {
 
 // Argon2id support (isomorphic via hash-wasm) — same params as server HARD_MAX
 const HARD_MAX = { m: 32 * 1024, t: 3, p: 1, hashLen: 32 } as const;
+// NOTE: mobile and standard intentionally share the same conservative
+// first-cut tuning. A heavier `high` profile is gated (Stage D) pending
+// broader device validation.
 const ARGON_PROFILES = {
   mobile: { m: 8 * 1024, t: 1, p: 1, hashLen: 32 },
   standard: { m: 8 * 1024, t: 1, p: 1, hashLen: 32 },
@@ -118,11 +122,17 @@ async function getArgon2id(): Promise<Argon2idFn> {
 }
 
 function padSalt(challenge: string): string {
+  // Matches server: new challenges are always >= 16 chars of real entropy;
+  // the padEnd branch only serves legacy 8-char challenges.
   if (challenge.length >= 16) return challenge.slice(0, 16);
   return challenge.padEnd(16, '0');
 }
 
 function resolveArgonParams(payload: ChallengePayload): { m: number; t: number; p: number; hashLen: number } {
+  // Reject unknown construction versions rather than solving under wrong assumptions.
+  if (payload.v !== undefined && payload.v !== 1) {
+    throw new Error('Unsupported challenge version');
+  }
   if (payload.m !== undefined) {
     // Token carries explicit params — validate against HARD_MAX
     const m = payload.m;
@@ -280,6 +290,7 @@ export async function solveSingleChallenge(
 ): Promise<ChallengeSolution | undefined> {
   const payload = decodeJWT(token);
   if (!payload) return undefined;
+  if (payload.v !== undefined && payload.v !== 1) return undefined;
 
   const { challenge, difficulty } = payload;
   const alg = (payload as ChallengePayload).alg ?? 'sha256';

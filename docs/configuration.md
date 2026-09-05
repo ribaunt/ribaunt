@@ -20,7 +20,7 @@ import { createChallenge } from 'ribaunt';
 | `amount` | `number` | `4` | Number of individual PoW challenges generated at once. Distributes solving workload but requires more network bandwidth. |
 | `ttlSeconds` | `number` | `30` | Expiration time of the JWT token. Rejects solutions submitted after this threshold. |
 | `algorithm` | `'sha256' \| 'argon2id'` | `'sha256'` | PoW algorithm. `argon2id` is memory-hard (`hash-wasm@4.12.0`, `m=8192 t=1 p=1` via `argonProfile`). Opt-in `demo/argon.html` (`pnpm demo`). |
-| `argonProfile` | `'mobile' \| 'standard'` | `'mobile'` | Only when `algorithm:'argon2id'`. Abstracts `m/t/p` (`{m:8192,t:1,p:1,hashLen:32}`, `HARD_MAX m=32768 t=3`). Never pass raw `m/t/p`. |
+| `argonProfile` | `'mobile' \| 'standard'` | `'mobile'` | Only when `algorithm:'argon2id'`. Abstracts `m/t/p` (currently both tiers share `{m:8192,t:1,p:1,hashLen:32}` as a conservative first cut; `high`/`HARD_MAX m=32768 t=3` is gated). Never pass raw `m/t/p`. |
 
 ### Validation Rules
 
@@ -230,7 +230,7 @@ Default remains `sha256` (microsecond hashes, cheap verify). For higher attacker
 ```typescript
 const challenges = await createChallenge({
   algorithm: 'argon2id',
-  argonProfile: 'mobile', // 'mobile' | 'standard' → {m:8192,t:1,p:1,hashLen:32}
+  argonProfile: 'mobile', // 'mobile' | 'standard' currently share {m:8192,t:1,p:1,hashLen:32}; 'high' gated
   difficulty: 'auto',
   calibration: await calibrateArgonNode(), // must match algorithm
   targetDurationMs: 750,
@@ -239,8 +239,11 @@ const challenges = await createChallenge({
 await verifySolution(tokens, await solveChallengeAsync(tokens)); // auto-dispatches
 ```
 
-* `HARD_MAX` (`m=32768 t=3 p=1 hashLen=32`) is library-enforced. `high` profile is gated (Stage D, see `bench/BROWSERSTACK.md`).
-* `argonProfile` abstracts `m/t/p` — never pass raw memory params. The adaptive engine (`riskScore` + `calibration`) keeps it device-aware, same as SHA.
+* `HARD_MAX` (`m=32768 t=3 p=1 hashLen=32`) is library-enforced on server and client. `high` profile is gated (Stage D, see `bench/BROWSERSTACK.md`).
+* `argonProfile` abstracts `m/t/p` — never pass raw memory params. The adaptive engine (`riskScore` + `calibration`) keeps it device-aware, same as SHA. `'mobile'` and `'standard'` intentionally share the same conservative tuning today so callers can adopt the tier split early; retuning later won't break in-flight tokens.
+* Tokens embed their own real `m/t/p` plus construction version `v:1` (salt derivation + difficulty mechanism). `verifySolution` needs no flag (payload carries `v/alg/m/t/p`); unknown future versions fail closed as `invalid-token`.
+* **Challenge entropy:** `challenge` is 16 random bytes (128-bit, 22 base64url chars); the Argon2id salt is its first 16 chars. Legacy 8-char challenges still verify via the padded-salt fallback but new issuance always uses full entropy.
+* **Non-goals:** Argon2id *narrows* but does not eliminate GPU/ASIC advantage — it raises attacker memory cost, it doesn't prove humanity. Keep it behind rate limiting as one layer, never the sole gate for sensitive actions. Heavier tuning is not for latency-sensitive flows; keep `sha256` default where a ~0.5–3s solve budget is unacceptable.
 * `assess({workload:{algorithm:'argon2id', argonProfile:'mobile'}})` threads the profile through; `verifySolution` needs no flag (payload carries `alg/m/t/p`).
 * **Performance:** `bench/memory-hard-server.ts` (`hash-wasm@4.12.0`) mobile `~6ms/hash` Node (`~12ms` browser); `difficulty:1` ≈ `16` avg attempts → `~400ms` browser, `difficulty:2` → `256` avg → `~3s` (`×amount`). Use `difficulty:'auto'` with `calibrateArgonBrowser` for `~750ms` target. Demo: `demo/argon.html` (`pnpm demo` → `http://localhost:3000/argon.html`).
 * **Worker:** `solver-worker.ts` auto-detects `alg` per batch, reports `backend:'argon2id'` (vs `'wasm'|'js'` for SHA). No `wasm-mode` tuning needed for Argon; `hash-wasm` WASM is base64-bundled (`demo/lib/hash-wasm.js` for static demo, `importmap` `hash-wasm` → `./lib/hash-wasm.js`).
