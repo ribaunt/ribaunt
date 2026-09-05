@@ -240,12 +240,16 @@ async function getArgon2idFn(): Promise<Argon2idFn> {
   return argon2idLoadPromise;
 }
 
+/**
+ * Derives the Argon2id salt from a challenge string.
+ *
+ * New challenges always carry >= 16 chars of real entropy (see
+ * generateChallenge), so this is a straight slice. The padEnd branch only
+ * exists to keep verifying legacy 8-char challenges issued before the
+ * entropy fix — its salt is weaker (8 random chars + '0' padding) but still
+ * provides per-challenge domain separation.
+ */
 function padSalt(challenge: string): string {
-  // New challenges are always >= 16 chars of real entropy (see
-  // generateChallenge), so this is a straight slice. The padEnd branch only
-  // exists to keep verifying legacy 8-char challenges issued before the
-  // entropy fix — its salt is weaker (8 random chars + '0' padding) but still
-  // provides per-challenge domain separation.
   if (challenge.length >= 16) return challenge.slice(0, 16);
   return challenge.padEnd(16, '0');
 }
@@ -286,6 +290,12 @@ function assertFiniteInteger(value: number, name: string, minimum: number): numb
   return normalized;
 }
 
+/**
+ * Type-guards a decoded JWT payload, enforcing per-algorithm bounds
+ * (argon2id m/t/p against HARD_MAX, difficulty ceilings) and rejecting
+ * unknown construction versions. Payloads without `v` are accepted as
+ * legacy v1.
+ */
 function isValidPayload(payload: unknown): payload is ChallengeTokenPayload {
   if (!payload || typeof payload !== 'object') return false;
   const value = payload as Partial<ChallengeTokenPayload>;
@@ -695,11 +705,13 @@ export function __resetArgonForTesting(): void {
   cachedArgonCalibrationWarmup = null;
 }
 
+/**
+ * Generates a fresh 128-bit challenge (16 random bytes, 22 base64url chars).
+ * The Argon2id salt is the first 16 chars of this string, so it always
+ * carries real entropy — never zero-padding. (Pre-fix challenges were 8
+ * chars, hence the padEnd legacy branch in padSalt.)
+ */
 function generateChallenge(): string {
-  // 16 random bytes (128-bit) encoded as 22 base64url chars. The Argon2id salt
-  // is the first 16 chars of this string, so it always carries ~96 bits of
-  // real entropy — never zero-padding. (Pre-fix challenges were 8 chars, hence
-  // the padEnd legacy branch in padSalt.)
   return crypto.randomBytes(16).toString('base64url');
 }
 
@@ -723,6 +735,11 @@ function getSecret(): string {
   return secret;
 }
 
+/**
+ * Mints one signed challenge token, embedding the construction version
+ * (`v:1`) and — for argon2id — the profile's real m/t/p, so in-flight
+ * tokens are unaffected by future profile retuning.
+ */
 function createSingleChallenge(
   difficulty: number,
   ttlSeconds: number,
@@ -881,6 +898,11 @@ function normalizeMaxDurationMs(options?: SolveChallengeOptions): number {
   return Math.max(0, Math.floor(options.maxDurationMs));
 }
 
+/**
+ * Synchronously solves one SHA-256 token. Returns undefined for argon2id
+ * tokens (use solveSingleChallengeAsync), unknown construction versions,
+ * and unsolvable inputs.
+ */
 function solveSingleChallenge(
   token: ChallengeToken,
   options?: SolveChallengeOptions
@@ -934,6 +956,10 @@ export function solveChallenge(
   return solveSingleChallenge(token, options);
 }
 
+/**
+ * Asynchronously solves one token of either algorithm. Returns undefined for
+ * unknown construction versions rather than solving under wrong assumptions.
+ */
 async function solveSingleChallengeAsync(
   token: ChallengeToken,
   options?: SolveChallengeOptions

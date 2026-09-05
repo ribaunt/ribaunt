@@ -238,6 +238,7 @@ describe('argon2id opt-in', () => {
 });
 
 describe('challenge entropy and construction version', () => {
+  /** Re-signs a decoded payload with the test secret, for crafting legacy or tampered tokens. */
   function resign(payload: Record<string, unknown>): string {
     return jwt.sign(payload, process.env.RIBAUNT_SECRET!);
   }

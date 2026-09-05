@@ -121,6 +121,10 @@ async function getArgon2id(): Promise<Argon2idFn> {
   return argon2idPromise;
 }
 
+/**
+ * Mirrors the server's salt derivation: the first 16 chars of the challenge,
+ * with zero-padding only for legacy 8-char challenges.
+ */
 function padSalt(challenge: string): string {
   // Matches server: new challenges are always >= 16 chars of real entropy;
   // the padEnd branch only serves legacy 8-char challenges.
