@@ -236,3 +236,55 @@ describe('argon2id opt-in', () => {
     expect(successes).toHaveLength(1);
   });
 });
+
+describe('challenge entropy and construction version', () => {
+  function resign(payload: Record<string, unknown>): string {
+    return jwt.sign(payload, process.env.RIBAUNT_SECRET!);
+  }
+
+  it('issues v:1 tokens with 22-char (128-bit) challenges', async () => {
+    const [sha] = await createChallenge({ difficulty: 1, amount: 1 });
+    const [argon] = await createChallenge({ algorithm: 'argon2id', difficulty: 1, amount: 1 });
+    for (const tok of [sha, argon]) {
+      const p = jwt.decode(tok!) as Record<string, unknown>;
+      expect(p.v).toBe(1);
+      expect(typeof p.challenge).toBe('string');
+      expect((p.challenge as string).length).toBeGreaterThanOrEqual(16);
+    }
+  });
+
+  it('still verifies legacy tokens without a version (sha + argon)', async () => {
+    const [sha] = await createChallenge({ difficulty: 1, amount: 1 });
+    const shaPayload = jwt.decode(sha!) as Record<string, unknown>;
+    delete shaPayload.v;
+    const legacySha = resign({ ...shaPayload, challenge: 'short12' });
+    const shaSol = solveChallenge(legacySha);
+    expect(shaSol).toBeDefined();
+    await expect(verifySolution(legacySha, shaSol!, { replayPrevention: 'disabled' })).resolves.toEqual({ valid: true });
+
+    const [argon] = await createChallenge({ algorithm: 'argon2id', difficulty: 1, amount: 1 });
+    const argonPayload = jwt.decode(argon!) as Record<string, unknown>;
+    delete argonPayload.v;
+    const legacyArgon = resign({ ...argonPayload, challenge: 'abcd1234' });
+    const argonSol = await solveChallengeAsync(legacyArgon);
+    expect(argonSol).toBeDefined();
+    await expect(verifySolution(legacyArgon, argonSol!, { replayPrevention: 'disabled' })).resolves.toEqual({ valid: true });
+  });
+
+  it('fails closed on unknown construction versions', async () => {
+    const [sha] = await createChallenge({ difficulty: 1, amount: 1 });
+    const shaPayload = jwt.decode(sha!) as Record<string, unknown>;
+    const badSha = resign({ ...shaPayload, v: 2 });
+    expect(solveChallenge(badSha)).toBeUndefined();
+    expect(await solveChallengeAsync(badSha)).toBeUndefined();
+    await expect(verifySolution(badSha, { nonce: '0', hash: '00' }, { replayPrevention: 'disabled', debug: false }))
+      .resolves.toMatchObject({ valid: false, reason: 'invalid-token' });
+
+    const [argon] = await createChallenge({ algorithm: 'argon2id', difficulty: 1, amount: 1 });
+    const argonPayload = jwt.decode(argon!) as Record<string, unknown>;
+    const badArgon = resign({ ...argonPayload, v: 2 });
+    expect(await solveChallengeAsync(badArgon)).toBeUndefined();
+    await expect(verifySolution(badArgon, { nonce: '0', hash: '00' }, { replayPrevention: 'disabled', debug: false }))
+      .resolves.toMatchObject({ valid: false, reason: 'invalid-token' });
+  });
+});

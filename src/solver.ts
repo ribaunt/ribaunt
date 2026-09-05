@@ -129,10 +129,6 @@ function padSalt(challenge: string): string {
 }
 
 function resolveArgonParams(payload: ChallengePayload): { m: number; t: number; p: number; hashLen: number } {
-  // Reject unknown construction versions rather than solving under wrong assumptions.
-  if (payload.v !== undefined && payload.v !== 1) {
-    throw new Error('Unsupported challenge version');
-  }
   if (payload.m !== undefined) {
     // Token carries explicit params — validate against HARD_MAX
     const m = payload.m;

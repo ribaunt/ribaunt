@@ -2,6 +2,7 @@
 import { vi } from 'vitest';
 import { webcrypto } from 'node:crypto';
 import { TextEncoder } from 'node:util';
+import jwt from 'jsonwebtoken';
 import { createChallenge } from '../src/index';
 import {
   solveSingleChallenge,
@@ -83,6 +84,27 @@ describe('browser solver argon2id', () => {
   it('yields while solving argon (hash is memory-hard but still responsive)', async () => {
     const [tok] = await createChallenge({ algorithm: 'argon2id', difficulty: 1, amount: 1 });
     const sol = await solveSingleChallenge(tok);
+    expect(sol?.hash.startsWith('0')).toBe(true);
+  });
+
+  it('returns undefined for unknown construction versions (sha + argon)', async () => {
+    const [sha] = await createChallenge({ difficulty: 1, amount: 1 });
+    const shaPayload = jwt.decode(sha!) as Record<string, unknown>;
+    await expect(solveSingleChallenge(jwt.sign({ ...shaPayload, v: 2 }, process.env.RIBAUNT_SECRET!)))
+      .resolves.toBeUndefined();
+
+    const [argon] = await createChallenge({ algorithm: 'argon2id', difficulty: 1, amount: 1 });
+    const argonPayload = jwt.decode(argon!) as Record<string, unknown>;
+    await expect(solveSingleChallenge(jwt.sign({ ...argonPayload, v: 2 }, process.env.RIBAUNT_SECRET!)))
+      .resolves.toBeUndefined();
+  });
+
+  it('still solves legacy versionless argon with a short challenge', async () => {
+    const [tok] = await createChallenge({ algorithm: 'argon2id', difficulty: 1, amount: 1 });
+    const payload = jwt.decode(tok!) as Record<string, unknown>;
+    delete payload.v;
+    const legacy = jwt.sign({ ...payload, challenge: 'abcd1234' }, process.env.RIBAUNT_SECRET!);
+    const sol = await solveSingleChallenge(legacy);
     expect(sol?.hash.startsWith('0')).toBe(true);
   });
 });
